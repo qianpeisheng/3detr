@@ -161,7 +161,7 @@ def all_gather_dict(data):
     Run all_gather on data which is a dictionary of Tensors
     """
     assert isinstance(data, dict)
-    
+
     gathered_dict = {}
     for item_key in data:
         if isinstance(data[item_key], torch.Tensor):
@@ -174,4 +174,3 @@ def all_gather_dict(data):
                 gathered_tensor = data[item_key]
             gathered_dict[item_key] = gathered_tensor
     return gathered_dict
-        

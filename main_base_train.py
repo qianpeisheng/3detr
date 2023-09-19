@@ -11,7 +11,7 @@ from torch.multiprocessing import set_start_method
 from torch.utils.data import DataLoader, DistributedSampler
 
 # 3DETR codebase specific imports
-from datasets import build_dataset
+from datasets import build_dataset_base
 from engine import evaluate, train_one_epoch
 from models import build_model
 from optimizer import build_optimizer
@@ -122,11 +122,14 @@ def make_args_parser():
     parser.add_argument("--dataset_num_workers", default=4, type=int)
     parser.add_argument("--batchsize_per_gpu", default=8, type=int)
 
+    # SDCoT specific args
+    parser.add_argument("--num_base_class", default=9, type=int)
+
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
     parser.add_argument("--max_epoch", default=720, type=int)
     parser.add_argument("--eval_every_epoch", default=10, type=int)
-    parser.add_argument("--seed", default=0, type=int)
+    parser.add_argument("--seed", default=42, type=int)
 
     ##### Testing #####
     parser.add_argument("--test_only", default=False, action="store_true")
@@ -352,7 +355,7 @@ def main(local_rank, args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed + get_rank())
 
-    datasets, dataset_config = build_dataset(args)
+    datasets, dataset_config = build_dataset_base(args)
     model, _ = build_model(args, dataset_config)
     model = model.cuda(local_rank)
     model_no_ddp = model

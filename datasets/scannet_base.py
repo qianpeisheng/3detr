@@ -5,6 +5,12 @@ Modified from https://github.com/facebookresearch/votenet
 Dataset for object bounding box regression.
 An axis aligned bounding box is parameterized by (cx,cy,cz) and (dx,dy,dz)
 where (cx,cy,cz) is the center point of the box, dx is the x-axis length of the box.
+
+# Following SDCoT https://github.com/Na-Z/SDCoT/blob/main/cfg/scannet_cfg.py
+# We change the order of class labels to match the order in the SDCoT paper.
+# The order is alphabetical (a to z).
+# "otherfurniture" in SDCoT is "garbagebin" in 3DETR.
+
 """
 import os
 import sys
@@ -22,74 +28,114 @@ IGNORE_LABEL = -100
 MEAN_COLOR_RGB = np.array([109.8, 97.2, 83.8])
 DATASET_ROOT_DIR = "scannet_data/scannet_all"  ## Replace with path to dataset
 DATASET_METADATA_DIR = "scannet_data/scannet/meta_data" ## Replace with path to dataset
+# In this dataset, all scans are saved in the same folder.
 
-class ScannetDatasetConfig(object):
-    def __init__(self):
-        self.num_semcls = 18
+NUM_CLASS = 9 # depending on the base training classes.
+
+class ScannetDatasetConfig_base(object):
+    def __init__(self, num_base_class=NUM_CLASS):
+        self.num_semcls = num_base_class # 18 means all classes
         self.num_angle_bin = 1
         self.max_num_obj = 64
 
         self.type2class = {
-            "cabinet": 0,
+            "bathtub": 0,
             "bed": 1,
-            "chair": 2,
-            "sofa": 3,
-            "table": 4,
-            "door": 5,
-            "window": 6,
-            "bookshelf": 7,
-            "picture": 8,
-            "counter": 9,
-            "desk": 10,
-            "curtain": 11,
-            "refrigerator": 12,
-            "showercurtrain": 13,
-            "toilet": 14,
-            "sink": 15,
-            "bathtub": 16,
-            "garbagebin": 17,
+            "bookshelf": 2,
+            "cabinet": 3,
+            "chair": 4,
+            "counter": 5,
+            "curtain": 6,
+            "desk": 7,
+            "door": 8,
+            "garbagebin": 9, # otherfurniture in SDCoT
+            "picture": 10,
+            "refrigerator": 11,
+            "showercurtrain": 12,
+            "sink": 13,
+            "sofa": 14,
+            "table": 15,
+            "toilet": 16,
+            "window": 17,
         }
+
+        # select only self.num_semcls classes
+        self.type2class = {
+            k: self.type2class[k] for k in list(self.type2class)[: self.num_semcls]
+        }
+        # note that dictionaries are ordered in Python 3.7+
+
+        # check that the size of the dictionary is correct
+        assert len(self.type2class) == self.num_semcls
+
+        # original 3detr order
+        # self.type2class = {
+        #     "cabinet": 0,
+        #     "bed": 1,
+        #     "chair": 2,
+        #     "sofa": 3,
+        #     "table": 4,
+        #     "door": 5,
+        #     "window": 6,
+        #     "bookshelf": 7,
+        #     "picture": 8,
+        #     "counter": 9,
+        #     "desk": 10,
+        #     "curtain": 11,
+        #     "refrigerator": 12,
+        #     "showercurtrain": 13,
+        #     "toilet": 14,
+        #     "sink": 15,
+        #     "bathtub": 16,
+        #     "garbagebin": 17,
+        # }
         self.class2type = {self.type2class[t]: t for t in self.type2class}
         self.nyu40ids = np.array(
-            [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39]
+            # [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39] # 3detr original order
+            np.array([36, 4, 10, 3, 5, 12, 16, 14, 8, 39, 11, 24, 28, 34, 6, 7, 33, 9]) # SDCoT order
         )
+
+        # select only self.num_semcls classes
+        self.nyu40ids = self.nyu40ids[: self.num_semcls]
+
         self.nyu40id2class = {
             nyu40id: i for i, nyu40id in enumerate(list(self.nyu40ids))
         }
 
         # Semantic Segmentation Classes. Not used in 3DETR
-        self.num_class_semseg = 20
-        self.type2class_semseg = {
-            "wall": 0,
-            "floor": 1,
-            "cabinet": 2,
-            "bed": 3,
-            "chair": 4,
-            "sofa": 5,
-            "table": 6,
-            "door": 7,
-            "window": 8,
-            "bookshelf": 9,
-            "picture": 10,
-            "counter": 11,
-            "desk": 12,
-            "curtain": 13,
-            "refrigerator": 14,
-            "showercurtrain": 15,
-            "toilet": 16,
-            "sink": 17,
-            "bathtub": 18,
-            "garbagebin": 19,
-        }
-        self.class2type_semseg = {
-            self.type2class_semseg[t]: t for t in self.type2class_semseg
-        }
-        self.nyu40ids_semseg = np.array(
-            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39]
-        )
-        self.nyu40id2class_semseg = {
-            nyu40id: i for i, nyu40id in enumerate(list(self.nyu40ids_semseg))
-        }
+
+        # self.num_class_semseg = 20
+        # self.type2class_semseg = {
+        #     "wall": 0,
+        #     "floor": 1,
+        #     "cabinet": 2,
+        #     "bed": 3,
+        #     "chair": 4,
+        #     "sofa": 5,
+        #     "table": 6,
+        #     "door": 7,
+        #     "window": 8,
+        #     "bookshelf": 9,
+        #     "picture": 10,
+        #     "counter": 11,
+        #     "desk": 12,
+        #     "curtain": 13,
+        #     "refrigerator": 14,
+        #     "showercurtrain": 15,
+        #     "toilet": 16,
+        #     "sink": 17,
+        #     "bathtub": 18,
+        #     "garbagebin": 19,
+        # }
+        # self.class2type_semseg = {
+        #     self.type2class_semseg[t]: t for t in self.type2class_semseg
+        # }
+        # self.nyu40ids_semseg = np.array(
+        #     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39]
+        # )
+        # self.nyu40id2class_semseg = {
+        #     nyu40id: i for i, nyu40id in enumerate(list(self.nyu40ids_semseg))
+        # }
 
     def angle2class(self, angle):
         raise ValueError("ScanNet does not have rotated bounding boxes.")
@@ -158,7 +204,7 @@ class ScannetDatasetConfig(object):
         return np.concatenate([new_centers, new_lengths], axis=1)
 
 
-class ScannetDetectionDataset(Dataset):
+class ScannetDetectionDataset_base(Dataset):
     def __init__(
         self,
         dataset_config,
@@ -231,6 +277,11 @@ class ScannetDetectionDataset(Dataset):
         )
         instance_bboxes = np.load(os.path.join(self.data_path, scan_name) + "_bbox.npy")
 
+        # Filter instance_bboxes and keep only those with classes that are in the dataset_config
+        instance_bboxes = instance_bboxes[
+            np.isin(instance_bboxes[:, -1], self.dataset_config.nyu40ids)
+        ]
+
         if not self.use_color:
             point_cloud = mesh_vertices[:, 0:3]  # do not use color for now
             pcl_color = mesh_vertices[:, 3:6]
@@ -270,12 +321,14 @@ class ScannetDetectionDataset(Dataset):
         instance_labels = instance_labels[choices]
         semantic_labels = semantic_labels[choices]
 
-        sem_seg_labels = np.ones_like(semantic_labels) * IGNORE_LABEL
+        # uncomment to use semantic labels
 
-        for _c in self.dataset_config.nyu40ids_semseg:
-            sem_seg_labels[
-                semantic_labels == _c
-            ] = self.dataset_config.nyu40id2class_semseg[_c]
+        # sem_seg_labels = np.ones_like(semantic_labels) * IGNORE_LABEL
+
+        # for _c in self.dataset_config.nyu40ids_semseg:
+        #     sem_seg_labels[
+        #         semantic_labels == _c
+        #     ] = self.dataset_config.nyu40id2class_semseg[_c]
 
         pcl_color = pcl_color[choices]
 

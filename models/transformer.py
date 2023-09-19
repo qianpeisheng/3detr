@@ -15,6 +15,8 @@ from torch import Tensor, nn
 from models.helpers import (ACTIVATION_DICT, NORM_DICT, WEIGHT_INIT_DICT,
                             get_clones)
 
+# Setting inplace=False to debug gradient issues
+# See https://github.com/NVlabs/FUNIT/issues/23#issuecomment-549099948
 
 class TransformerEncoder(nn.Module):
 
@@ -203,11 +205,11 @@ class MaskedTransformerEncoder(TransformerEncoder):
             output = output.permute(1, 2, 0).view(bs, c, h, w).contiguous()
 
         return xyz, output, xyz_inds
-    
+
     def extra_repr(self):
         radius_str = ", ".join(["%.2f"%(x) for x in self.masking_radius])
         return f"masking_radius={radius_str}"
-        
+
 
 
 class TransformerEncoderLayer(nn.Module):
@@ -225,14 +227,14 @@ class TransformerEncoderLayer(nn.Module):
         if self.use_ffn:
             # Implementation of Feedforward model
             self.linear1 = nn.Linear(d_model, dim_feedforward, bias=ffn_use_bias)
-            self.dropout = nn.Dropout(dropout, inplace=True)
+            self.dropout = nn.Dropout(dropout, inplace=False)
             self.linear2 = nn.Linear(dim_feedforward, d_model, bias=ffn_use_bias)
             self.norm2 = NORM_DICT[norm_name](d_model)
             self.norm2 = NORM_DICT[norm_name](d_model)
-            self.dropout2 = nn.Dropout(dropout, inplace=True)
+            self.dropout2 = nn.Dropout(dropout, inplace=False)
 
         self.norm1 = NORM_DICT[norm_name](d_model)
-        self.dropout1 = nn.Dropout(dropout, inplace=True)
+        self.dropout1 = nn.Dropout(dropout, inplace=False)
 
         self.activation = ACTIVATION_DICT[activation]()
         self.normalize_before = normalize_before
@@ -311,13 +313,13 @@ class TransformerDecoderLayer(nn.Module):
         self.norm2 = NORM_DICT[norm_fn_name](d_model)
 
         self.norm3 = NORM_DICT[norm_fn_name](d_model)
-        self.dropout1 = nn.Dropout(dropout, inplace=True)
-        self.dropout2 = nn.Dropout(dropout, inplace=True)
-        self.dropout3 = nn.Dropout(dropout, inplace=True)
+        self.dropout1 = nn.Dropout(dropout, inplace=False)
+        self.dropout2 = nn.Dropout(dropout, inplace=False)
+        self.dropout3 = nn.Dropout(dropout, inplace=False)
 
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
-        self.dropout = nn.Dropout(dropout, inplace=True)
+        self.dropout = nn.Dropout(dropout, inplace=False)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
 
         self.activation = ACTIVATION_DICT[activation]()

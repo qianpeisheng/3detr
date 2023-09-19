@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copyright (c) Facebook, Inc. and its affiliates.
 
-python main.py
+python main.py \
 --dataset_name scannet \
 --nqueries 256 \
 --max_epoch 90 \

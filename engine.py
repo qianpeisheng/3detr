@@ -213,3 +213,83 @@ def evaluate(
         logger.log_scalars(test_dict, curr_train_iter, prefix="Test/")
 
     return ap_calculator
+
+
+@torch.no_grad()
+def evaluate_incremental(
+    args,
+    curr_epoch,
+    model,
+    criterion,
+    dataset_config,
+    dataset_loader,
+    logger,
+    curr_train_iter,
+):
+
+    # ap calculator is exact for evaluation. This is slower than the ap calculator used during training.
+    ap_calculator = APCalculator(
+        dataset_config=dataset_config,
+        ap_iou_thresh=[0.25, 0.5],
+        class2type_map=dataset_config.class2type,
+        exact_eval=True,
+    )
+
+    curr_iter = 0
+    net_device = next(model.parameters()).device
+    num_batches = len(dataset_loader)
+
+    time_delta = SmoothedValue(window_size=10)
+    loss_avg = SmoothedValue(window_size=10)
+    model.eval()
+    barrier()
+    epoch_str = f"[{curr_epoch}/{args.max_epoch}]" if curr_epoch > 0 else ""
+
+    for batch_idx, batch_data_label in enumerate(dataset_loader):
+        curr_time = time.time()
+        for key in batch_data_label:
+            batch_data_label[key] = batch_data_label[key].to(net_device)
+
+        inputs = {
+            "point_clouds": batch_data_label["point_clouds"],
+            "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
+            "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
+        }
+        outputs = model(inputs)
+
+        # Compute loss
+        loss_str = ""
+        if criterion is not None:
+            loss, loss_dict = criterion(outputs, batch_data_label)
+
+            loss_reduced = all_reduce_average(loss)
+            loss_dict_reduced = reduce_dict(loss_dict)
+            loss_avg.update(loss_reduced.item())
+            loss_str = f"Loss {loss_avg.avg:0.2f};"
+
+        # Memory intensive as it gathers point cloud GT tensor across all ranks
+        outputs["outputs"] = all_gather_dict(outputs["outputs"])
+        batch_data_label = all_gather_dict(batch_data_label)
+        ap_calculator.step_meter(outputs, batch_data_label)
+        time_delta.update(time.time() - curr_time)
+        if is_primary() and curr_iter % args.log_every == 0:
+            mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+            print(
+                f"Evaluate {epoch_str}; Batch [{curr_iter}/{num_batches}]; {loss_str} Iter time {time_delta.avg:0.2f}; Mem {mem_mb:0.2f}MB"
+            )
+
+            test_dict = {}
+            test_dict["memory"] = mem_mb
+            test_dict["batch_time"] = time_delta.avg
+            if criterion is not None:
+                test_dict["loss"] = loss_avg.avg
+        curr_iter += 1
+        barrier()
+    if is_primary():
+        if criterion is not None:
+            logger.log_scalars(
+                loss_dict_reduced, curr_train_iter, prefix="Test_details/"
+            )
+        logger.log_scalars(test_dict, curr_train_iter, prefix="Test/")
+
+    return ap_calculator

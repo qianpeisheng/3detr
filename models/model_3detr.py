@@ -337,6 +337,46 @@ class Model3DETR(nn.Module):
             query_xyz, point_cloud_dims, box_features
         )
         return box_predictions
+    
+    def enroll_weights(self, base_weights, base_bias):
+        '''
+        Following SDCoT paper, we concat the weights and bias of the base model to the current model.
+        The weights and bias of the base model are the weights and bias of the last layer of the base model.
+        The weights and bias of the current model are the weights and bias of the last layer of the current model.
+        Note that in SDCoT, this function just copy the weights and bias of the base model to the current model without any modification.
+        While in our implementation, we concat the weights and bias of the base model to the current model.
+        '''
+        novel_weights = self.mlp_heads["sem_cls_head"].layers[-1].weight.detach().clone()
+        novel_bias = self.mlp_heads["sem_cls_head"].layers[-1].bias.detach().clone()
+
+        # remove the last dimension of base_weights and base_bias because they are for the background class
+        base_weights = base_weights[:-1, ...]
+        base_bias = base_bias[:-1]
+
+        # define self.mlp_heads["sem_cls_head"].layers[-1] as a new nn.Conv1d layer
+        self.mlp_heads["sem_cls_head"].layers[-1] = nn.Conv1d(in_channels=self.mlp_heads["sem_cls_head"].layers[-1].in_channels, out_channels=novel_weights.shape[0] + base_weights.shape[0], kernel_size=1, stride=1, padding=0, dilation=1, groups=1, bias=True)
+
+        # stack base_weights and novel_weights along the first dimension
+        self.mlp_heads["sem_cls_head"].layers[-1].weight = nn.Parameter(torch.cat((base_weights, novel_weights), dim=0))
+
+        # stack base_bias and novel_bias along the first dimension
+        self.mlp_heads["sem_cls_head"].layers[-1].bias = nn.Parameter(torch.cat((base_bias, novel_bias), dim=0))
+
+        return novel_weights, novel_bias
+
+    def deroll_weights(self, novel_weights, novel_bias):
+        '''
+        Enroll_weights is used for evaluation.
+        After evaluation, we need to deroll_weights to restore the model to the original state.
+        '''
+        # define model.mlp_heads["sem_cls_head"].layers[-1] as a new nn.Conv1d layer
+        self.mlp_heads["sem_cls_head"].layers[-1] = nn.Conv1d(in_channels=self.mlp_heads["sem_cls_head"].layers[-1].in_channels, out_channels=novel_weights.shape[0], kernel_size=1, stride=1, padding=0, dilation=1, groups=1, bias=True)
+        
+        # replace the weights and bias of the last layer of the current model with novel_weights and novel_bias
+        self.mlp_heads["sem_cls_head"].layers[-1].weight = nn.Parameter(novel_weights)
+        self.mlp_heads["sem_cls_head"].layers[-1].bias = nn.Parameter(novel_bias)
+
+
 
 
 def build_preencoder(args):

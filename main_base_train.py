@@ -137,6 +137,7 @@ def make_args_parser():
 
     ##### I/O #####
     parser.add_argument("--checkpoint_dir", default=None, type=str)
+    parser.add_argument("--checkpoint_name", default="checkpoint_0300.pth", type=str)
     parser.add_argument("--log_every", default=10, type=int)
     parser.add_argument("--log_metrics_every", default=20, type=int)
     parser.add_argument("--save_separate_checkpoint_every_epoch", default=100, type=int)
@@ -405,7 +406,7 @@ def main(local_rank, args):
             os.makedirs(args.checkpoint_dir, exist_ok=True)
         optimizer = build_optimizer(args, model_no_ddp)
         loaded_epoch, best_val_metrics = resume_if_possible(
-            args.checkpoint_dir, model_no_ddp, optimizer
+            args.checkpoint_dir, model_no_ddp, optimizer, args.checkpoint_name
         )
         args.start_epoch = loaded_epoch + 1
         do_train(

@@ -30,7 +30,7 @@ def save_checkpoint(
     torch.save(sd, checkpoint_name)
 
 
-def resume_if_possible(checkpoint_dir, model_no_ddp, optimizer):
+def resume_if_possible(checkpoint_dir, model_no_ddp, optimizer, checkpoint_name="checkpoint_0300.pth"):
     """
     Resume if checkpoint is available.
     Return
@@ -41,10 +41,11 @@ def resume_if_possible(checkpoint_dir, model_no_ddp, optimizer):
     if not os.path.isdir(checkpoint_dir):
         return epoch, best_val_metrics
 
-    last_checkpoint = os.path.join(checkpoint_dir, "checkpoint.pth")
+    last_checkpoint = os.path.join(checkpoint_dir, checkpoint_name)
     if not os.path.isfile(last_checkpoint):
         return epoch, best_val_metrics
-
+    print('last_checkpoint', last_checkpoint)
+    print('resuming ............')
     sd = torch.load(last_checkpoint, map_location=torch.device("cpu"))
     epoch = sd["epoch"]
     best_val_metrics = sd["best_val_metrics"]

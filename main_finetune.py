@@ -436,7 +436,7 @@ def main(local_rank, args):
         # random init classifier weights in model
         model_no_ddp.mlp_heads["sem_cls_head"][-1].weight.data.normal_(0, 0.01)
         model_no_ddp.mlp_heads["sem_cls_head"][-1].bias.data.zero_()
-        
+
         args.start_epoch = loaded_epoch + 1
         do_train(
             args,

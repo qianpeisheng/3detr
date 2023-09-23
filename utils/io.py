@@ -74,15 +74,28 @@ def resume_if_possible_incremental(checkpoint_dir, model_no_ddp, optimizer, chec
         return epoch, best_val_metrics
 
     sd = torch.load(last_checkpoint, map_location=torch.device("cpu"))
+    # epoch = sd["epoch"]
+    sd['epoch'] = 0 # reset epoch to 0
     epoch = sd["epoch"]
     best_val_metrics = sd["best_val_metrics"]
+
+    # set all values in best_val_metrics to 0, note that the best_val_metrics is a dict and could be nested
+    def set_zero(d):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                set_zero(v)
+            else:
+                d[k] = 0
+
     print(f"Found checkpoint at {epoch}. Resuming.")
 
 
     model_no_ddp.load_state_dict(sd["model"])
 
-    optimizer.load_state_dict(sd["optimizer"])
+    # do not load optimizer for incremental training as the optimizers are not the same when loading from different epochs of base training.
+    # optimizer.load_state_dict(sd["optimizer"])
     print(
-        f"Loaded model and optimizer state at {epoch}. Loaded best val metrics so far."
+        # f"Loaded model and optimizer state at {epoch}. Loaded best val metrics so far."
+        f"Loaded model at {epoch}. Loaded best val metrics so far. NOT loading the optimizer."
     )
     return epoch, best_val_metrics

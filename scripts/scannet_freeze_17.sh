@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copyright (c) Facebook, Inc. and its affiliates.
 
-CUDA_VISIBLE_DEVICES=1 python3 main_finetune.py \
+CUDA_VISIBLE_DEVICES=2 python3 main_finetune.py \
 --dataset_name scannet \
 --num_base_class 17 \
 --num_novel_class 1 \
@@ -17,5 +17,6 @@ CUDA_VISIBLE_DEVICES=1 python3 main_finetune.py \
 --eval_every_epoch 50 \
 --dataset_num_workers 8 \
 --batchsize_per_gpu 16 \
---checkpoint_dir ckpts_scannet/scannet_finetune_17 \
---checkpoint_name checkpoint_best_6270.pth
+--checkpoint_dir ckpts_scannet/scannet_freeze_17 \
+--checkpoint_name checkpoint_best_6270.pth \
+--freeze

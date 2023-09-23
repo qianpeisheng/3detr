@@ -83,6 +83,9 @@ def make_args_parser():
     parser.add_argument("--nqueries", default=256, type=int)
     parser.add_argument("--use_color", default=False, action="store_true")
 
+    # add if freeze all model parameters
+    parser.add_argument("--freeze", default=False, action="store_true")
+
     ##### Set Loss #####
     ### Matcher
     parser.add_argument("--matcher_giou_cost", default=2, type=float)
@@ -125,6 +128,7 @@ def make_args_parser():
     # SDCoT specific args
     parser.add_argument("--num_base_class", default=9, type=int)
     parser.add_argument("--num_novel_class", default=0, type=int)
+
 
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
@@ -237,7 +241,7 @@ def do_train(
                 best_val_metrics,
             )
 
-        if epoch % args.eval_every_epoch == 1 or epoch == (args.max_epoch - 1):
+        if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1):
 
             # enroll_weights
             novel_weights, novel_bias = model.enroll_weights(base_weight, base_bias)
@@ -445,6 +449,14 @@ def main(local_rank, args):
         # random init classifier weights in model
         model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].weight.data.normal_(0, 0.01)
         model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].bias.data.zero_()
+
+        # freeze all model parameters except classifier weights
+        if args.freeze:
+            for name, param in model_no_ddp.named_parameters():
+                if 'mlp_heads' not in name:
+                    param.requires_grad = False
+                else:
+                    print('not freezing ', name)
 
         args.start_epoch = loaded_epoch + 1
         do_train(

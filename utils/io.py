@@ -78,7 +78,9 @@ def resume_if_possible_incremental(checkpoint_dir, model_no_ddp, optimizer, chec
     best_val_metrics = sd["best_val_metrics"]
     print(f"Found checkpoint at {epoch}. Resuming.")
 
+
     model_no_ddp.load_state_dict(sd["model"])
+
     optimizer.load_state_dict(sd["optimizer"])
     print(
         f"Loaded model and optimizer state at {epoch}. Loaded best val metrics so far."

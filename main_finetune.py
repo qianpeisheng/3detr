@@ -155,8 +155,10 @@ def do_train(
     model,
     model_no_ddp,
     optimizer,
-    criterion,
-    dataset_config,
+    criterion_train,
+    criterion_val,
+    dataset_config_train,
+    dataset_config_val,
     dataloaders,
     best_val_metrics,
     base_weight,
@@ -193,8 +195,8 @@ def do_train(
             epoch,
             model,
             optimizer,
-            criterion,
-            dataset_config,
+            criterion_train,
+            dataset_config_train,
             dataloaders["train"],
             logger,
         )
@@ -235,7 +237,7 @@ def do_train(
                 best_val_metrics,
             )
 
-        if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1):
+        if epoch % args.eval_every_epoch == 1 or epoch == (args.max_epoch - 1):
 
             # enroll_weights
             novel_weights, novel_bias = model.enroll_weights(base_weight, base_bias)
@@ -244,8 +246,8 @@ def do_train(
                 args,
                 epoch,
                 model,
-                criterion,
-                dataset_config,
+                criterion_val,
+                dataset_config_val,
                 dataloaders["test"],
                 logger,
                 curr_iter,
@@ -290,8 +292,8 @@ def do_train(
         args,
         epoch,
         model,
-        criterion,
-        dataset_config,
+        criterion_val,
+        dataset_config_val,
         dataloaders["test"],
         logger,
         curr_iter,
@@ -320,7 +322,7 @@ def do_train(
     # no need to deroll_weights because we are done with training.
 
 # When testing, the model checkpoint should contains the classifier weights for all classes.
-def test_model(args, model, model_no_ddp, criterion, dataset_config, dataloaders):
+def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dataloaders):
     if args.test_ckpt is None or not os.path.isfile(args.test_ckpt):
         f"Please specify a test checkpoint using --test_ckpt. Found invalid value {args.test_ckpt}"
         sys.exit(1)
@@ -328,15 +330,15 @@ def test_model(args, model, model_no_ddp, criterion, dataset_config, dataloaders
     sd = torch.load(args.test_ckpt, map_location=torch.device("cpu"))
     model_no_ddp.load_state_dict(sd["model"])
     logger = Logger()
-    criterion = None  # do not compute loss for speed-up; Comment out to see test loss
+    criterion_val = None  # do not compute loss for speed-up; Comment out to see test loss
     epoch = -1
     curr_iter = 0
     ap_calculator = evaluate(
         args,
         epoch,
         model,
-        criterion,
-        dataset_config,
+        criterion_val,
+        dataset_config_val,
         dataloaders["test"],
         logger,
         curr_iter,
@@ -370,8 +372,11 @@ def main(local_rank, args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed + get_rank())
 
-    datasets, dataset_config = build_dataset_incremental(args)
-    model, _ = build_model(args, dataset_config)
+    # For incremental learning, the train and test dataset are different,
+    # The train dataset only contains NOVEL classes.
+    # The test dataset contains both base and novel classes.
+    datasets, dataset_config_train, dataset_config_val = build_dataset_incremental(args)
+    model, _ = build_model(args, dataset_config_train)
     model = model.cuda(local_rank)
     model_no_ddp = model
 
@@ -380,8 +385,11 @@ def main(local_rank, args):
         model = torch.nn.parallel.DistributedDataParallel(
             model, device_ids=[local_rank]
         )
-    criterion = build_criterion(args, dataset_config)
-    criterion = criterion.cuda(local_rank)
+    criterion_train = build_criterion(args, dataset_config_train)
+    criterion_train = criterion_train.cuda(local_rank)
+
+    criterion_val = build_criterion(args, dataset_config_val)
+    criterion_val = criterion_val.cuda(local_rank)
 
     dataloaders = {}
     if args.test_only:
@@ -411,7 +419,7 @@ def main(local_rank, args):
 
     if args.test_only:
         criterion = None  # faster evaluation
-        test_model(args, model, model_no_ddp, criterion, dataset_config, dataloaders)
+        test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dataloaders)
     else:
         assert (
             args.checkpoint_dir is not None
@@ -430,12 +438,13 @@ def main(local_rank, args):
         # self.classifier_weights_base = self.classifier_weights_base.squeeze(-1)
 
         # save classifier weights in model_no_ddp
-        classifier_weights_base = model_no_ddp.mlp_heads["sem_cls_head"][-1].weight.detach().clone()
-        classifier_bias_base = model_no_ddp.mlp_heads["sem_cls_head"][-1].bias.detach().clone()
+        classifier_weights_base = model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].weight.detach().clone()
+        classifier_bias_base = model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].bias.detach().clone()
+        model_no_ddp.deroll_weights_init(out_dim = args.num_novel_class + 1) # +1 for background class
 
         # random init classifier weights in model
-        model_no_ddp.mlp_heads["sem_cls_head"][-1].weight.data.normal_(0, 0.01)
-        model_no_ddp.mlp_heads["sem_cls_head"][-1].bias.data.zero_()
+        model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].weight.data.normal_(0, 0.01)
+        model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].bias.data.zero_()
 
         args.start_epoch = loaded_epoch + 1
         do_train(
@@ -443,8 +452,10 @@ def main(local_rank, args):
             model,
             model_no_ddp,
             optimizer,
-            criterion,
-            dataset_config,
+            criterion_train,
+            criterion_val,
+            dataset_config_train,
+            dataset_config_val,
             dataloaders,
             best_val_metrics,
             base_weight = classifier_weights_base,

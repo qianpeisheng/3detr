@@ -56,7 +56,9 @@ class BoxProcessor(object):
         return angle
 
     def compute_objectness_and_cls_prob(self, cls_logits):
-        assert cls_logits.shape[-1] == self.dataset_config.num_semcls + 1
+        # The following assert is not true for fine-tuning evaluation.
+
+        # assert cls_logits.shape[-1] == self.dataset_config.num_semcls + 1
         cls_prob = torch.nn.functional.softmax(cls_logits, dim=-1)
         objectness_prob = 1 - cls_prob[..., -1]
         return cls_prob[..., :-1], objectness_prob
@@ -92,6 +94,7 @@ class Model3DETR(nn.Module):
         encoder,
         decoder,
         dataset_config,
+        dataset_config_val,
         encoder_dim=256,
         decoder_dim=256,
         position_embedding="fourier",
@@ -143,10 +146,18 @@ class Model3DETR(nn.Module):
             dropout=mlp_dropout,
             input_dim=decoder_dim,
         )
-
         # Semantic class of the box
+        if hasattr(dataset_config, 'num_semcls_novel'):
+            # semcls_head should output num_novel_class + 1 classes
+            # but we load the weights and bias of the base model to the current model
+            # and will deroll the weights and bias.
+            semcls_head = mlp_func(output_dim=dataset_config.num_semcls_base + 1)
+        else:
+            # semcls_head should output num_semcls + 1 classes
+            semcls_head = mlp_func(output_dim=dataset_config.num_semcls + 1)
         # add 1 for background/not-an-object class
-        semcls_head = mlp_func(output_dim=dataset_config.num_semcls + 1)
+        # semcls_head = mlp_func(output_dim=dataset_config.num_semcls + 1)
+
 
         # geometry of the box
         center_head = mlp_func(output_dim=3)
@@ -337,7 +348,7 @@ class Model3DETR(nn.Module):
             query_xyz, point_cloud_dims, box_features
         )
         return box_predictions
-    
+
     def enroll_weights(self, base_weights, base_bias):
         '''
         Following SDCoT paper, we concat the weights and bias of the base model to the current model.
@@ -371,13 +382,15 @@ class Model3DETR(nn.Module):
         '''
         # define model.mlp_heads["sem_cls_head"].layers[-1] as a new nn.Conv1d layer
         self.mlp_heads["sem_cls_head"].layers[-1] = nn.Conv1d(in_channels=self.mlp_heads["sem_cls_head"].layers[-1].in_channels, out_channels=novel_weights.shape[0], kernel_size=1, stride=1, padding=0, dilation=1, groups=1, bias=True)
-        
+
         # replace the weights and bias of the last layer of the current model with novel_weights and novel_bias
         self.mlp_heads["sem_cls_head"].layers[-1].weight = nn.Parameter(novel_weights)
         self.mlp_heads["sem_cls_head"].layers[-1].bias = nn.Parameter(novel_bias)
 
-
-
+    def deroll_weights_init(self, out_dim):
+        # define model.mlp_heads["sem_cls_head"].layers[-1] as a new nn.Conv1d layer
+        self.mlp_heads["sem_cls_head"].layers[-1] = nn.Conv1d(in_channels=self.mlp_heads["sem_cls_head"].layers[-1].in_channels, out_channels=out_dim, kernel_size=1, stride=1, padding=0, dilation=1, groups=1, bias=True)
+        self.mlp_heads["sem_cls_head"].layers[-1].cuda()
 
 def build_preencoder(args):
     mlp_dims = [3 * int(args.use_color), 64, 128, args.enc_dim]
@@ -444,15 +457,21 @@ def build_decoder(args):
     return decoder
 
 
-def build_3detr(args, dataset_config):
+def build_3detr(args, dataset_config, dataset_config_val=None):
     pre_encoder = build_preencoder(args)
     encoder = build_encoder(args)
     decoder = build_decoder(args)
+
+    # For base model, dataset_config_val is None.
+    # For incremental model, dataset_config_val is the dataset_config of all classes for evaluation.
+    if dataset_config_val is None:
+        dataset_config_val = dataset_config
     model = Model3DETR(
         pre_encoder,
         encoder,
         decoder,
-        dataset_config,
+        dataset_config = dataset_config,
+        dataset_config_val = dataset_config_val,
         encoder_dim=args.enc_dim,
         decoder_dim=args.dec_dim,
         mlp_dropout=args.mlp_dropout,

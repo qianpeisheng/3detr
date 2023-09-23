@@ -14,8 +14,8 @@ CUDA_VISIBLE_DEVICES=1 python3 main_finetune.py \
 --loss_giou_weight 1 \
 --loss_no_object_weight 0.25 \
 --save_separate_checkpoint_every_epoch 100 \
---eval_every_epoch 2 \
---dataset_num_workers 4 \
---batchsize_per_gpu 8 \
+--eval_every_epoch 1 \
+--dataset_num_workers 8 \
+--batchsize_per_gpu 16 \
 --checkpoint_dir ckpts_scannet/scannet_finetune_17 \
 --checkpoint_name base_17_e_500_61_41.pth

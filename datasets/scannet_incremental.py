@@ -35,14 +35,20 @@ NUM_CLASS_INCREMENTAL = 9 # depending on the incremental training classes.
 
 
 class ScannetDatasetConfig_incremental(object):
-    def __init__(self, num_base_class=NUM_CLASS_BASE, num_incremental_class=NUM_CLASS_INCREMENTAL):
+    def __init__(self, num_base_class=NUM_CLASS_BASE, num_novel_class=NUM_CLASS_INCREMENTAL):
+        '''
+        Args:
+            num_base_class: number of base classes
+            num_novel_class: number of incremental classes
+
+        '''
         self.num_semcls_all = 18 # all classes
         self.num_semcls_base = num_base_class
-        self.num_semcls_incremental = num_incremental_class
-        self.num_semcls_base_and_inc = self.num_semcls_base + self.num_semcls_incremental
-        self.num_semcls = self.num_semcls_incremental # number of classes used for training. This is to match the original 3DETR code model_3detr.py compute_objectness_and_cls_prob
+        self.num_semcls_novel = num_novel_class
+        self.num_semcls_base_and_inc = self.num_semcls_base + self.num_semcls_novel
+        self.num_semcls = self.num_semcls_novel # number of classes used for training. This is to match the original 3DETR code model_3detr.py compute_objectness_and_cls_prob
 
-        # check the number of classes is correct (base + incremental) <= all classes (18) 
+        # check the number of classes is correct (base + incremental) <= all classes (18)
         assert self.num_semcls_all >= self.num_semcls_base_and_inc
 
         self.num_angle_bin = 1
@@ -73,10 +79,16 @@ class ScannetDatasetConfig_incremental(object):
         self.type2class = {
             k: self.type2class[k] for k in list(self.type2class)[self.num_semcls_base: self.num_semcls_base_and_inc]
         }
+
+        # for eval, we need to keep the base classes as well
+        self.type2class_eval = {
+            k: self.type2class[k] for k in list(self.type2class)[: self.num_semcls_base_and_inc]
+        }
+
         # note that dictionaries are ordered in Python 3.7+
 
         # check that the size of the dictionary is correct
-        assert len(self.type2class) == self.num_semcls_incremental
+        assert len(self.type2class) == self.num_semcls_novel
 
         # original 3detr order
         # self.type2class = {
@@ -100,6 +112,10 @@ class ScannetDatasetConfig_incremental(object):
         #     "garbagebin": 17,
         # }
         self.class2type = {self.type2class[t]: t for t in self.type2class}
+
+        # for eval
+        self.class2type_eval = {self.type2class_eval[t]: t for t in self.type2class_eval}
+
         self.nyu40ids = np.array(
             # [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39] # 3detr original order
             np.array([36, 4, 10, 3, 5, 12, 16, 14, 8, 39, 11, 24, 28, 34, 6, 7, 33, 9]) # SDCoT order
@@ -275,6 +291,7 @@ class ScannetDetectionDataset_incremental(Dataset):
 
     def __len__(self):
         return len(self.scan_names)
+        # return 64 # for debugging
 
     def __getitem__(self, idx):
         scan_name = self.scan_names[idx]

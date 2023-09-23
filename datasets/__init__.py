@@ -70,8 +70,8 @@ def build_dataset_base(args):
 
 def build_dataset_incremental(args):
     dataset_builder = DATASET_FUNCTIONS_INCREMENTAL[args.dataset_name][0]
-    dataset_config_train = DATASET_FUNCTIONS_INCREMENTAL[args.dataset_name][1](num_base_class = args.num_base_class, num_incremental_class = args.num_incremental_class)
-    dataset_config_val = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class + args.num_incremental_class)
+    dataset_config_train = DATASET_FUNCTIONS_INCREMENTAL[args.dataset_name][1](num_base_class = args.num_base_class, num_novel_class = args.num_novel_class)
+    dataset_config_val = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class + args.num_novel_class)
     # note that the val dataset covers both base and incremental classes
 
     dataset_dict = {
@@ -91,4 +91,4 @@ def build_dataset_incremental(args):
             augment=False,
         ),
     }
-    return dataset_dict, dataset_config_train
+    return dataset_dict, dataset_config_train, dataset_config_val

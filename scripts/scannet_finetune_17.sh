@@ -5,7 +5,7 @@ CUDA_VISIBLE_DEVICES=1 python3 main_finetune.py \
 --dataset_name scannet \
 --num_base_class 17 \
 --num_novel_class 1 \
---max_epoch 500 \
+--max_epoch 510 \
 --nqueries 256 \
 --matcher_giou_cost 2 \
 --matcher_cls_cost 1 \

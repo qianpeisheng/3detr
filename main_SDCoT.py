@@ -11,14 +11,14 @@ from torch.multiprocessing import set_start_method
 from torch.utils.data import DataLoader, DistributedSampler
 
 # 3DETR codebase specific imports
-from datasets import build_dataset_incremental
+from datasets import build_dataset_SDCoT
 from engine import evaluate, train_one_epoch, evaluate_incremental
 from models import build_model
 from optimizer import build_optimizer
 from criterion import build_criterion
 from utils.dist import init_distributed, is_distributed, is_primary, get_rank, barrier
 from utils.misc import my_worker_init_fn
-from utils.io import save_checkpoint, resume_if_possible, resume_if_possible_finetune
+from utils.io import save_checkpoint, resume_if_possible, resume_if_possible_SDCoT
 from utils.logger import Logger
 
 torch.autograd.set_detect_anomaly(True)
@@ -379,7 +379,7 @@ def main(local_rank, args):
     # For incremental learning, the train and test dataset are different,
     # The train dataset only contains NOVEL classes.
     # The test dataset contains both base and novel classes.
-    datasets, dataset_config_train, dataset_config_val = build_dataset_incremental(args)
+    datasets, dataset_config_train, dataset_config_val = build_dataset_SDCoT(args)
     model, _ = build_model(args, dataset_config_train)
     model = model.cuda(local_rank)
     model_no_ddp = model
@@ -431,8 +431,9 @@ def main(local_rank, args):
         if is_primary() and not os.path.isdir(args.checkpoint_dir):
             os.makedirs(args.checkpoint_dir, exist_ok=True)
         optimizer = build_optimizer(args, model_no_ddp)
-        loaded_epoch, best_val_metrics = resume_if_possible_finetune(
-            args.checkpoint_dir, model_no_ddp, optimizer, checkpoint_name=args.checkpoint_name
+        loaded_epoch, best_val_metrics = resume_if_possible_SDCoT(
+            args.checkpoint_dir, model_no_ddp, optimizer, checkpoint_name=args.checkpoint_name, num_cls_novel = args.num_novel_class, \
+            num_cls_base = args.num_base_class
         )
 
         # refering to SDCoT paper, we need to save classifier weights in model_no_ddp

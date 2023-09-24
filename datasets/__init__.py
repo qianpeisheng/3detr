@@ -2,6 +2,7 @@
 from .scannet import ScannetDetectionDataset, ScannetDatasetConfig
 from .scannet_base import ScannetDetectionDataset_base, ScannetDatasetConfig_base
 from .scannet_incremental import ScannetDetectionDataset_incremental, ScannetDatasetConfig_incremental
+from .scannet_SDCoT import ScannetDetectionDataset_SDCoT, ScannetDatasetConfig_SDCoT
 
 from .sunrgbd import SunrgbdDetectionDataset, SunrgbdDatasetConfig
 
@@ -19,6 +20,11 @@ DATASET_FUNCTIONS_BASE = {
 
 DATASET_FUNCTIONS_INCREMENTAL = {
     "scannet": [ScannetDetectionDataset_incremental, ScannetDatasetConfig_incremental],
+    "sunrgbd": [SunrgbdDetectionDataset, SunrgbdDatasetConfig],
+}
+
+DATASET_FUNCTIONS_SDCoT = {
+    "scannet": [ScannetDetectionDataset_SDCoT, ScannetDatasetConfig_SDCoT],
     "sunrgbd": [SunrgbdDetectionDataset, SunrgbdDatasetConfig],
 }
 
@@ -93,11 +99,11 @@ def build_dataset_incremental(args):
     }
     return dataset_dict, dataset_config_train, dataset_config_val
 
-
 def build_dataset_SDCoT(args):
     # TODO The current implementation is not correct. the train dataset should not load base classes labels.
-    dataset_builder = DATASET_FUNCTIONS_INCREMENTAL[args.dataset_name][0]
-    dataset_config_train = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class + args.num_novel_class)
+    dataset_builder = DATASET_FUNCTIONS_SDCoT[args.dataset_name][0]
+    dataset_config_train = DATASET_FUNCTIONS_SDCoT[args.dataset_name][1](num_base_class = args.num_base_class, num_novel_class = args.num_novel_class)
+    dataset_config_base = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class)
     dataset_config_val = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class + args.num_novel_class)
     # note that the val dataset covers both base and incremental classes
 
@@ -118,4 +124,4 @@ def build_dataset_SDCoT(args):
             augment=False,
         ),
     }
-    return dataset_dict, dataset_config_train, dataset_config_val
+    return dataset_dict, dataset_config_train, dataset_config_val, dataset_config_base

@@ -165,8 +165,6 @@ def do_train(
     dataset_config_val,
     dataloaders,
     best_val_metrics,
-    base_weight,
-    base_bias
 ):
     """
     Main training loop.
@@ -243,9 +241,6 @@ def do_train(
 
         if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1):
 
-            # enroll_weights
-            novel_weights, novel_bias = model.enroll_weights(base_weight, base_bias)
-
             ap_calculator = evaluate_incremental(
                 args,
                 epoch,
@@ -284,14 +279,9 @@ def do_train(
                     f"Epoch [{epoch}/{args.max_epoch}] saved current best val checkpoint at {filename}; ap25 {ap25}"
                 )
 
-            # deroll_weights
-            model.deroll_weights(novel_weights, novel_bias)
-
     # always evaluate last checkpoint
     epoch = args.max_epoch - 1
     curr_iter = epoch * len(dataloaders["train"])
-    # enroll_weights
-    novel_weights, novel_bias = model.enroll_weights(base_weight, base_bias)
     ap_calculator = evaluate_incremental(
         args,
         epoch,
@@ -379,7 +369,25 @@ def main(local_rank, args):
     # For incremental learning, the train and test dataset are different,
     # The train dataset only contains NOVEL classes.
     # The test dataset contains both base and novel classes.
-    datasets, dataset_config_train, dataset_config_val = build_dataset_SDCoT(args)
+
+
+    datasets, dataset_config_train, dataset_config_val, dataset_config_base = build_dataset_SDCoT(args)
+
+    # define the base detection model and load weights
+    base_detection_model, _ = build_model(args, dataset_config_base)
+    base_detection_model = base_detection_model.cuda(local_rank) # TODO add ddp
+    resume_if_possible(
+        checkpoint_dir=args.checkpoint_dir, model_no_ddp=base_detection_model, optimizer=None, checkpoint_name=args.checkpoint_name
+    )
+
+    # For the train set, set the base detector
+    datasets['train'].set_base_detector(base_detection_model)
+    temp_input = datasets['train'][0]
+    import pdb; pdb.set_trace()
+    temp = datasets['train'].generate_pseudo_labels(temp_input['point_clouds'], temp_input['point_cloud_dims_min'], temp_input['point_cloud_dims_max'])
+    # temp['outputs'].keys()
+    # need to implement parse_prediction_to_pseudo_bboxes from SDCoT
+
     model, _ = build_model(args, dataset_config_train)
     model = model.cuda(local_rank)
     model_no_ddp = model
@@ -422,7 +430,7 @@ def main(local_rank, args):
         dataloaders[split + "_sampler"] = sampler
 
     if args.test_only:
-        criterion = None  # faster evaluation
+        criterion_val = None  # faster evaluation
         test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dataloaders)
     else:
         assert (
@@ -435,21 +443,6 @@ def main(local_rank, args):
             args.checkpoint_dir, model_no_ddp, optimizer, checkpoint_name=args.checkpoint_name, num_cls_novel = args.num_novel_class, \
             num_cls_base = args.num_base_class
         )
-
-        # refering to SDCoT paper, we need to save classifier weights in model_no_ddp
-
-        # self.classifier_weights_base = torch.empty_like(self.model.prediction_header.classifier_weights).copy_(
-        #                                     self.model.prediction_header.classifier_weights.detach())
-        # self.classifier_weights_base = self.classifier_weights_base.squeeze(-1)
-
-        # save classifier weights in model_no_ddp
-        classifier_weights_base = model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].weight.detach().clone()
-        classifier_bias_base = model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].bias.detach().clone()
-        model_no_ddp.deroll_weights_init(out_dim = args.num_novel_class + 1) # +1 for background class
-
-        # random init classifier weights in model
-        model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].weight.data.normal_(0, 0.01)
-        model_no_ddp.mlp_heads["sem_cls_head"].layers[-1].bias.data.zero_()
 
         # freeze all model parameters except classifier weights
         if args.freeze:
@@ -471,8 +464,6 @@ def main(local_rank, args):
             dataset_config_val,
             dataloaders,
             best_val_metrics,
-            base_weight = classifier_weights_base,
-            base_bias = classifier_bias_base
         )
 
 

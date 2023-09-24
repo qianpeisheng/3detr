@@ -52,7 +52,10 @@ def resume_if_possible(checkpoint_dir, model_no_ddp, optimizer, checkpoint_name=
     print(f"Found checkpoint at {epoch}. Resuming.")
 
     model_no_ddp.load_state_dict(sd["model"])
-    optimizer.load_state_dict(sd["optimizer"])
+    if optimizer is None:
+        print('optimizer is None')
+    else:
+        optimizer.load_state_dict(sd["optimizer"])
     print(
         f"Loaded model and optimizer state at {epoch}. Loaded best val metrics so far."
     )
@@ -131,7 +134,6 @@ def resume_if_possible_SDCoT(checkpoint_dir, model_no_ddp, optimizer, checkpoint
                 d[k] = 0
 
     print(f"Found checkpoint at {epoch}. Resuming.")
-    import pdb; pdb.set_trace()
     # Following SD-COT sdcot_trainer.py init_classifier_weights, we need to reset the classifier weights.
     # The checkpoint's classification head has a last linear layer with num_cls_base classes,
     # but model_no_ddp has a last linear layer with num_cls_base + num_cls_novel classes.

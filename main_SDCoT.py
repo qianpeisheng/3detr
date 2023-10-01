@@ -23,8 +23,10 @@ from utils.logger import Logger
 
 torch.autograd.set_detect_anomaly(True)
 
+
 def make_args_parser():
-    parser = argparse.ArgumentParser("3D Detection Using Transformers", add_help=False)
+    parser = argparse.ArgumentParser(
+        "3D Detection Using Transformers", add_help=False)
 
     ##### Optimizer #####
     parser.add_argument("--base_lr", default=5e-4, type=float)
@@ -33,7 +35,8 @@ def make_args_parser():
     parser.add_argument("--final_lr", default=1e-6, type=float)
     parser.add_argument("--lr_scheduler", default="cosine", type=str)
     parser.add_argument("--weight_decay", default=0.1, type=float)
-    parser.add_argument("--filter_biases_wd", default=False, action="store_true")
+    parser.add_argument("--filter_biases_wd",
+                        default=False, action="store_true")
     parser.add_argument(
         "--clip_gradient", default=0.1, type=float, help="Max L2 norm of the gradient"
     )
@@ -46,7 +49,7 @@ def make_args_parser():
         help="Name of the model",
         choices=["3detr"],
     )
-    ### Encoder
+    # Encoder
     parser.add_argument(
         "--enc_type", default="vanilla", choices=["masked", "maskedv2", "vanilla"]
     )
@@ -59,14 +62,14 @@ def make_args_parser():
     parser.add_argument("--enc_pos_embed", default=None, type=str)
     parser.add_argument("--enc_activation", default="relu", type=str)
 
-    ### Decoder
+    # Decoder
     parser.add_argument("--dec_nlayers", default=8, type=int)
     parser.add_argument("--dec_dim", default=256, type=int)
     parser.add_argument("--dec_ffn_dim", default=256, type=int)
     parser.add_argument("--dec_dropout", default=0.1, type=float)
     parser.add_argument("--dec_nhead", default=4, type=int)
 
-    ### MLP heads for predicting bounding boxes
+    # MLP heads for predicting bounding boxes
     parser.add_argument("--mlp_dropout", default=0.3, type=float)
     parser.add_argument(
         "--nsemcls",
@@ -75,7 +78,7 @@ def make_args_parser():
         help="Number of semantic object classes. Can be inferred from dataset",
     )
 
-    ### Other model params
+    # Other model params
     parser.add_argument("--preenc_npoints", default=2048, type=int)
     parser.add_argument(
         "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
@@ -87,13 +90,13 @@ def make_args_parser():
     parser.add_argument("--freeze", default=False, action="store_true")
 
     ##### Set Loss #####
-    ### Matcher
+    # Matcher
     parser.add_argument("--matcher_giou_cost", default=2, type=float)
     parser.add_argument("--matcher_cls_cost", default=1, type=float)
     parser.add_argument("--matcher_center_cost", default=0, type=float)
     parser.add_argument("--matcher_objectness_cost", default=0, type=float)
 
-    ### Loss Weights
+    # Loss Weights
     parser.add_argument("--loss_giou_weight", default=0, type=float)
     parser.add_argument("--loss_sem_cls_weight", default=1, type=float)
     parser.add_argument(
@@ -129,7 +132,6 @@ def make_args_parser():
     parser.add_argument("--num_base_class", default=9, type=int)
     parser.add_argument("--num_novel_class", default=0, type=int)
 
-
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
     parser.add_argument("--max_epoch", default=720, type=int)
@@ -142,10 +144,12 @@ def make_args_parser():
 
     ##### I/O #####
     parser.add_argument("--checkpoint_dir", default=None, type=str)
-    parser.add_argument("--checkpoint_name", default="base_checkpoint.pth", type=str)
+    parser.add_argument("--checkpoint_name",
+                        default="base_checkpoint.pth", type=str)
     parser.add_argument("--log_every", default=10, type=int)
     parser.add_argument("--log_metrics_every", default=20, type=int)
-    parser.add_argument("--save_separate_checkpoint_every_epoch", default=100, type=int)
+    parser.add_argument(
+        "--save_separate_checkpoint_every_epoch", default=100, type=int)
 
     ##### Distributed Training #####
     parser.add_argument("--ngpus", default=1, type=int)
@@ -175,7 +179,8 @@ def do_train(
     num_iters_per_epoch = len(dataloaders["train"])
     num_iters_per_eval_epoch = len(dataloaders["test"])
     print(f"Model is {model}")
-    print(f"Training started at epoch {args.start_epoch} until {args.max_epoch}.")
+    print(
+        f"Training started at epoch {args.start_epoch} until {args.max_epoch}.")
     print(f"One training epoch = {num_iters_per_epoch} iters.")
     print(f"One eval epoch = {num_iters_per_eval_epoch} iters.")
 
@@ -257,12 +262,14 @@ def do_train(
             metrics_dict = ap_calculator.metrics_to_dict(metrics)
             if is_primary():
                 print("==" * 10)
-                print(f"Evaluate Epoch [{epoch}/{args.max_epoch}]; Metrics {metric_str}")
+                print(
+                    f"Evaluate Epoch [{epoch}/{args.max_epoch}]; Metrics {metric_str}")
                 print("==" * 10)
                 logger.log_scalars(metrics_dict, curr_iter, prefix="Test/")
 
             if is_primary() and (
-                len(best_val_metrics) == 0 or best_val_metrics[0.25]["mAP"] < ap25
+                len(
+                    best_val_metrics) == 0 or best_val_metrics[0.25]["mAP"] < ap25
             ):
                 best_val_metrics = metrics
                 filename = "checkpoint_best.pth"
@@ -296,7 +303,8 @@ def do_train(
     metric_str = ap_calculator.metrics_to_str(metrics)
     if is_primary():
         print("==" * 10)
-        print(f"Evaluate Final [{epoch}/{args.max_epoch}]; Metrics {metric_str}")
+        print(
+            f"Evaluate Final [{epoch}/{args.max_epoch}]; Metrics {metric_str}")
         print("==" * 10)
 
         with open(final_eval, "w") as fh:
@@ -316,6 +324,8 @@ def do_train(
     # no need to deroll_weights because we are done with training.
 
 # When testing, the model checkpoint should contains the classifier weights for all classes.
+
+
 def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dataloaders):
     if args.test_ckpt is None or not os.path.isfile(args.test_ckpt):
         f"Please specify a test checkpoint using --test_ckpt. Found invalid value {args.test_ckpt}"
@@ -370,12 +380,12 @@ def main(local_rank, args):
     # The train dataset only contains NOVEL classes.
     # The test dataset contains both base and novel classes.
 
-
-    datasets, dataset_config_train, dataset_config_val, dataset_config_base = build_dataset_SDCoT(args)
+    datasets, dataset_config_train, dataset_config_val, dataset_config_base = build_dataset_SDCoT(
+        args)
 
     # define the base detection model and load weights
     base_detection_model, _ = build_model(args, dataset_config_base)
-    base_detection_model = base_detection_model.cuda(local_rank) # TODO add ddp
+    base_detection_model = base_detection_model.cuda(local_rank)  # TODO add ddp
     resume_if_possible(
         checkpoint_dir=args.checkpoint_dir, model_no_ddp=base_detection_model, optimizer=None, checkpoint_name=args.checkpoint_name
     )
@@ -383,8 +393,10 @@ def main(local_rank, args):
     # For the train set, set the base detector
     datasets['train'].set_base_detector(base_detection_model)
     temp_input = datasets['train'][0]
-    import pdb; pdb.set_trace()
-    temp = datasets['train'].generate_pseudo_labels(temp_input['point_clouds'], temp_input['point_cloud_dims_min'], temp_input['point_cloud_dims_max'])
+    import pdb
+    pdb.set_trace()
+    temp = datasets['train'].generate_pseudo_labels(
+        temp_input['point_clouds'], temp_input['point_cloud_dims_min'], temp_input['point_cloud_dims_max'])
     # temp['outputs'].keys()
     # need to implement parse_prediction_to_pseudo_bboxes from SDCoT
 
@@ -431,7 +443,8 @@ def main(local_rank, args):
 
     if args.test_only:
         criterion_val = None  # faster evaluation
-        test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dataloaders)
+        test_model(args, model, model_no_ddp, criterion_val,
+                   dataset_config_val, dataloaders)
     else:
         assert (
             args.checkpoint_dir is not None
@@ -440,8 +453,8 @@ def main(local_rank, args):
             os.makedirs(args.checkpoint_dir, exist_ok=True)
         optimizer = build_optimizer(args, model_no_ddp)
         loaded_epoch, best_val_metrics = resume_if_possible_SDCoT(
-            args.checkpoint_dir, model_no_ddp, optimizer, checkpoint_name=args.checkpoint_name, num_cls_novel = args.num_novel_class, \
-            num_cls_base = args.num_base_class
+            args.checkpoint_dir, model_no_ddp, optimizer, checkpoint_name=args.checkpoint_name, num_cls_novel=args.num_novel_class,
+            num_cls_base=args.num_base_class
         )
 
         # freeze all model parameters except classifier weights

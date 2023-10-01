@@ -23,19 +23,22 @@ from utils.box_util import (flip_axis_to_camera_np, flip_axis_to_camera_tensor,
                             get_3d_box_batch_np, get_3d_box_batch_tensor)
 from utils.pc_util import scale_points, shift_scale_points
 from utils.random_cuboid import RandomCuboid
+from utils.ap_calculator import get_ap_config_dict, parse_predictions_SDCoT
 
 IGNORE_LABEL = -100
 MEAN_COLOR_RGB = np.array([109.8, 97.2, 83.8])
-DATASET_ROOT_DIR = "scannet_data/scannet_all"  ## Replace with path to dataset
-DATASET_METADATA_DIR = "scannet_data/scannet/meta_data" ## Replace with path to dataset
+DATASET_ROOT_DIR = "scannet_data/scannet_all"  # Replace with path to dataset
+# Replace with path to dataset
+DATASET_METADATA_DIR = "scannet_data/scannet/meta_data"
 # In this dataset, all scans are saved in the same folder.
 
-NUM_CLASS_BASE = 9 # depending on the base training classes.
-NUM_CLASS_INCREMENTAL = 9 # depending on the incremental training classes.
+NUM_CLASS_BASE = 9  # depending on the base training classes.
+NUM_CLASS_INCREMENTAL = 9  # depending on the incremental training classes.
+
 
 class ScannetDatasetConfig_SDCoT(object):
     def __init__(self, num_base_class=NUM_CLASS_BASE, num_novel_class=NUM_CLASS_INCREMENTAL):
-        self.num_semcls = num_base_class + num_novel_class# 18 means all classes
+        self.num_semcls = num_base_class + num_novel_class  # 18 means all classes
         self.num_base_class = num_base_class
         self.num_novel_class = num_novel_class
         self.num_angle_bin = 1
@@ -51,7 +54,7 @@ class ScannetDatasetConfig_SDCoT(object):
             "curtain": 6,
             "desk": 7,
             "door": 8,
-            "garbagebin": 9, # otherfurniture in SDCoT
+            "garbagebin": 9,  # otherfurniture in SDCoT
             "picture": 10,
             "refrigerator": 11,
             "showercurtrain": 12,
@@ -95,7 +98,8 @@ class ScannetDatasetConfig_SDCoT(object):
         self.class2type = {self.type2class[t]: t for t in self.type2class}
         self.nyu40ids = np.array(
             # [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39] # 3detr original order
-            np.array([36, 4, 10, 3, 5, 12, 16, 14, 8, 39, 11, 24, 28, 34, 6, 7, 33, 9]) # SDCoT order
+            np.array([36, 4, 10, 3, 5, 12, 16, 14, 8, 39, 11,
+                     24, 28, 34, 6, 7, 33, 9])  # SDCoT order
         )
 
         # select only the novel classes
@@ -246,7 +250,8 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         if split_set == "all":
             self.scan_names = all_scan_names
         elif split_set in ["train", "val", "test"]:
-            split_filenames = os.path.join(meta_data_dir, f"scannetv2_{split_set}.txt")
+            split_filenames = os.path.join(
+                meta_data_dir, f"scannetv2_{split_set}.txt")
             with open(split_filenames, "r") as f:
                 self.scan_names = f.read().splitlines()
             # remove unavailiable scans
@@ -263,7 +268,8 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         self.use_height = use_height
         self.augment = augment
         self.use_random_cuboid = use_random_cuboid
-        self.random_cuboid_augmentor = RandomCuboid(min_points=random_cuboid_min_points)
+        self.random_cuboid_augmentor = RandomCuboid(
+            min_points=random_cuboid_min_points)
         self.center_normalizing_range = [
             np.zeros((1, 3), dtype=np.float32),
             np.ones((1, 3), dtype=np.float32),
@@ -296,27 +302,45 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         # https://pytorch.org/docs/stable/data.html
 
         batch_data_label = {}
-        batch_data_label["point_clouds"] = torch.tensor(point_clouds).unsqueeze(0).cuda()
-        batch_data_label["point_cloud_dims_min"] = torch.tensor(mins).unsqueeze(0).cuda()
-        batch_data_label["point_cloud_dims_max"] = torch.tensor(maxes).unsqueeze(0).cuda()
+        batch_data_label["point_clouds"] = torch.tensor(
+            point_clouds).unsqueeze(0).cuda()
+        batch_data_label["point_cloud_dims_min"] = torch.tensor(
+            mins).unsqueeze(0).cuda()
+        batch_data_label["point_cloud_dims_max"] = torch.tensor(
+            maxes).unsqueeze(0).cuda()
 
         with torch.no_grad():
             outputs = self.base_detector(batch_data_label)
-        return outputs
+            parsed_predictions = parse_predictions_SDCoT(
+                predicted_boxes=outputs['outputs']['box_corners'],
+                sem_cls_probs=outputs['outputs']['sem_cls_prob'],
+                objectness_probs=outputs['outputs']['objectness_prob'],
+                point_cloud=batch_data_label["point_clouds"],
+                config_dict=self.ap_config_dict,
+            )
+
+        # convert to __getitem__ output format
+
+        return parsed_predictions
+
+    def set_ap_config_dict(self, ap_config_dict):
+        self.ap_config_dict = ap_config_dict
 
     def __len__(self):
         return len(self.scan_names)
 
     def __getitem__(self, idx):
         scan_name = self.scan_names[idx]
-        mesh_vertices = np.load(os.path.join(self.data_path, scan_name) + "_vert.npy")
+        mesh_vertices = np.load(os.path.join(
+            self.data_path, scan_name) + "_vert.npy")
         instance_labels = np.load(
             os.path.join(self.data_path, scan_name) + "_ins_label.npy"
         )
         semantic_labels = np.load(
             os.path.join(self.data_path, scan_name) + "_sem_label.npy"
         )
-        instance_bboxes = np.load(os.path.join(self.data_path, scan_name) + "_bbox.npy")
+        instance_bboxes = np.load(os.path.join(
+            self.data_path, scan_name) + "_bbox.npy")
         # Filter instance_bboxes and keep only those with classes that are in the dataset_config
         instance_bboxes = instance_bboxes[
             np.isin(instance_bboxes[:, -1], self.dataset_config.nyu40ids_novel)
@@ -333,7 +357,8 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         if self.use_height:
             floor_height = np.percentile(point_cloud[:, 2], 0.99)
             height = point_cloud[:, 2] - floor_height
-            point_cloud = np.concatenate([point_cloud, np.expand_dims(height, 1)], 1)
+            point_cloud = np.concatenate(
+                [point_cloud, np.expand_dims(height, 1)], 1)
 
         # ------------------------------- LABELS ------------------------------
         MAX_NUM_OBJ = self.dataset_config.max_num_obj
@@ -358,6 +383,16 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         point_cloud, choices = pc_util.random_sampling(
             point_cloud, self.num_points, return_choices=True
         )
+
+        # obtain pseudo labels
+        # pseudo_labels = self.generate_pseudo_labels(
+        #     point_cloud,
+        #     point_cloud.min(axis=0)[:3],
+        #     point_cloud.max(axis=0)[:3]
+        # )
+        # return pseudo_labels, instance_bboxes
+        # for pseudo_label in pseudo_labels:
+
         instance_labels = instance_labels[choices]
         semantic_labels = semantic_labels[choices]
 
@@ -372,8 +407,8 @@ class ScannetDetectionDataset_SDCoT(Dataset):
 
         pcl_color = pcl_color[choices]
 
-        target_bboxes_mask[0 : instance_bboxes.shape[0]] = 1
-        target_bboxes[0 : instance_bboxes.shape[0], :] = instance_bboxes[:, 0:6]
+        target_bboxes_mask[0: instance_bboxes.shape[0]] = 1
+        target_bboxes[0: instance_bboxes.shape[0], :] = instance_bboxes[:, 0:6]
 
         # ------------------------------- DATA AUGMENTATION ------------------------------
         if self.augment:
@@ -389,9 +424,11 @@ class ScannetDetectionDataset_SDCoT(Dataset):
                 target_bboxes[:, 1] = -1 * target_bboxes[:, 1]
 
             # Rotation along up-axis/Z-axis
-            rot_angle = (np.random.random() * np.pi / 18) - np.pi / 36  # -5 ~ +5 degree
+            rot_angle = (np.random.random() * np.pi / 18) - \
+                np.pi / 36  # -5 ~ +5 degree
             rot_mat = pc_util.rotz(rot_angle)
-            point_cloud[:, 0:3] = np.dot(point_cloud[:, 0:3], np.transpose(rot_mat))
+            point_cloud[:, 0:3] = np.dot(
+                point_cloud[:, 0:3], np.transpose(rot_mat))
             target_bboxes = self.dataset_config.rotate_aligned_boxes(
                 target_bboxes, rot_mat
             )
@@ -410,7 +447,8 @@ class ScannetDetectionDataset_SDCoT(Dataset):
             dst_range=self.center_normalizing_range,
         )
         box_centers_normalized = box_centers_normalized.squeeze(0)
-        box_centers_normalized = box_centers_normalized * target_bboxes_mask[..., None]
+        box_centers_normalized = box_centers_normalized * \
+            target_bboxes_mask[..., None]
         mult_factor = point_cloud_dims_max - point_cloud_dims_min
         box_sizes_normalized = scale_points(
             raw_sizes.astype(np.float32)[None, ...],
@@ -435,19 +473,22 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         ret_dict["gt_angle_class_label"] = angle_classes.astype(np.int64)
         ret_dict["gt_angle_residual_label"] = angle_residuals.astype(np.float32)
         target_bboxes_semcls = np.zeros((MAX_NUM_OBJ))
-        target_bboxes_semcls[0 : instance_bboxes.shape[0]] = [
+        target_bboxes_semcls[0: instance_bboxes.shape[0]] = [
             self.dataset_config.nyu40id2class[int(x)]
-            for x in instance_bboxes[:, -1][0 : instance_bboxes.shape[0]]
+            for x in instance_bboxes[:, -1][0: instance_bboxes.shape[0]]
         ]
         ret_dict["gt_box_sem_cls_label"] = target_bboxes_semcls.astype(np.int64)
         ret_dict["gt_box_present"] = target_bboxes_mask.astype(np.float32)
         ret_dict["scan_idx"] = np.array(idx).astype(np.int64)
         ret_dict["pcl_color"] = pcl_color
         ret_dict["gt_box_sizes"] = raw_sizes.astype(np.float32)
-        ret_dict["gt_box_sizes_normalized"] = box_sizes_normalized.astype(np.float32)
+        ret_dict["gt_box_sizes_normalized"] = box_sizes_normalized.astype(
+            np.float32)
         ret_dict["gt_box_angles"] = raw_angles.astype(np.float32)
-        ret_dict["point_cloud_dims_min"] = point_cloud_dims_min.astype(np.float32)
-        ret_dict["point_cloud_dims_max"] = point_cloud_dims_max.astype(np.float32)
+        ret_dict["point_cloud_dims_min"] = point_cloud_dims_min.astype(
+            np.float32)
+        ret_dict["point_cloud_dims_max"] = point_cloud_dims_max.astype(
+            np.float32)
         return ret_dict
 
 # TODO add testing code below

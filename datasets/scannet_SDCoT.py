@@ -464,14 +464,20 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         if len(converted_instance_bboxes) > 0:
             target_bboxes = np.concatenate(
                 (converted_instance_bboxes_no_cls, target_bboxes), axis=0)
+            if len(converted_instance_bboxes) + instance_bboxes.shape[0] > MAX_NUM_OBJ:
+                target_bboxes_mask[:] = 1
+            else:
+                target_bboxes_mask[0: len(converted_instance_bboxes) +
+                                   instance_bboxes.shape[0]] = 1
+        else:
+            # no pseudo labels, only instance labels
+            # assuming instance_bboxes is no more than MAX_NUM_OBJ
+            target_bboxes_mask[0: instance_bboxes.shape[0]] = 1
 
         # make sure target_bboxes is no more than MAX_NUM_OBJ
         # this line will always trigger because target_bboxes is already MAX_NUM_OBJ
         # but the truncated values are all zeros
         target_bboxes = target_bboxes[0: MAX_NUM_OBJ]
-
-        # the mask includes both pseudo labels and instance labels
-        target_bboxes_mask[0: target_bboxes.shape[0]] = 1
 
         raw_sizes = target_bboxes[:, 3:6]
         point_cloud_dims_min = point_cloud.min(axis=0)[:3]

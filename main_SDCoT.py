@@ -387,6 +387,7 @@ def main(local_rank, args):
     # define the base detection model and load weights
     base_detection_model, _ = build_model(args, dataset_config_base)
     base_detection_model = base_detection_model.cuda(local_rank)  # TODO add ddp
+    # load the base detection model
     resume_if_possible(
         checkpoint_dir=args.checkpoint_dir, model_no_ddp=base_detection_model, optimizer=None, checkpoint_name=args.checkpoint_name
     )
@@ -402,6 +403,32 @@ def main(local_rank, args):
     model, _ = build_model(args, dataset_config_train)
     model = model.cuda(local_rank)
     model_no_ddp = model
+    # load the base detection model weights to the model partially
+
+    def load_except_classifier(model, base_detection_model):
+        # set all weights in model to zero
+        for name, param in model.named_parameters():
+            param.data.zero_()
+
+        _stat_dict = base_detection_model.state_dict()
+        old_cls_size = _stat_dict['mlp_heads.sem_cls_head.layers.8.weight'].shape[0]
+        new_cls_size = model.state_dict(
+        )['mlp_heads.sem_cls_head.layers.8.weight'].shape[0]
+        assert new_cls_size >= old_cls_size
+        # copy the old classifier weights to the new classifier weights
+        model.state_dict()['mlp_heads.sem_cls_head.layers.8.weight'][:old_cls_size,
+                                                                     ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.weight']
+        model.state_dict()['mlp_heads.sem_cls_head.layers.8.bias'][:old_cls_size,
+                                                                   ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.bias']
+
+        # remove mlp_heads.sem_cls_head.layers.8.weight and bias from the state dict
+        _stat_dict.pop('mlp_heads.sem_cls_head.layers.8.weight')
+        _stat_dict.pop('mlp_heads.sem_cls_head.layers.8.bias')
+        # _state_dict does not contain the classifier weights
+        model.load_state_dict(_stat_dict, strict=False)
+
+    load_except_classifier(model, base_detection_model)
+    # model.load_state_dict(base_detection_model.state_dict(), strict=False)
 
     if is_distributed():
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)

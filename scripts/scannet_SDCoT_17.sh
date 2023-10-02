@@ -14,8 +14,12 @@ CUDA_VISIBLE_DEVICES=3 python3 main_SDCoT.py \
 --loss_giou_weight 1 \
 --loss_no_object_weight 0.25 \
 --save_separate_checkpoint_every_epoch 50 \
---eval_every_epoch 50 \
+--eval_every_epoch 1 \
 --dataset_num_workers 4 \
 --batchsize_per_gpu 8 \
 --checkpoint_dir ckpts_scannet/scannet_SDCoT_17 \
---checkpoint_name checkpoint_best_6270.pth
+--checkpoint_name checkpoint_best_6270.pth \
+--base_lr 0.0000 \
+--final_lr 0.000000 \
+--test_only \
+--test_ckpt ckpts_scannet_pretrained/scannet_masked_ep1080.pth \

@@ -28,6 +28,7 @@ DATASET_FUNCTIONS_SDCoT = {
     "sunrgbd": [SunrgbdDetectionDataset, SunrgbdDatasetConfig],
 }
 
+
 def build_dataset(args):
     dataset_builder = DATASET_FUNCTIONS[args.dataset_name][0]
     dataset_config = DATASET_FUNCTIONS[args.dataset_name][1]()
@@ -51,9 +52,11 @@ def build_dataset(args):
     }
     return dataset_dict, dataset_config
 
+
 def build_dataset_base(args):
     dataset_builder = DATASET_FUNCTIONS_BASE[args.dataset_name][0]
-    dataset_config = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class)
+    dataset_config = DATASET_FUNCTIONS_BASE[args.dataset_name][1](
+        num_base_class=args.num_base_class)
 
     dataset_dict = {
         "train": dataset_builder(
@@ -74,10 +77,13 @@ def build_dataset_base(args):
     }
     return dataset_dict, dataset_config
 
+
 def build_dataset_incremental(args):
     dataset_builder = DATASET_FUNCTIONS_INCREMENTAL[args.dataset_name][0]
-    dataset_config_train = DATASET_FUNCTIONS_INCREMENTAL[args.dataset_name][1](num_base_class = args.num_base_class, num_novel_class = args.num_novel_class)
-    dataset_config_val = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class + args.num_novel_class)
+    dataset_config_train = DATASET_FUNCTIONS_INCREMENTAL[args.dataset_name][1](
+        num_base_class=args.num_base_class, num_novel_class=args.num_novel_class)
+    dataset_config_val = DATASET_FUNCTIONS_BASE[args.dataset_name][1](
+        num_base_class=args.num_base_class + args.num_novel_class)
     # note that the val dataset covers both base and incremental classes
 
     dataset_dict = {
@@ -99,16 +105,21 @@ def build_dataset_incremental(args):
     }
     return dataset_dict, dataset_config_train, dataset_config_val
 
+
 def build_dataset_SDCoT(args):
     # TODO The current implementation is not correct. the train dataset should not load base classes labels.
-    dataset_builder = DATASET_FUNCTIONS_SDCoT[args.dataset_name][0]
-    dataset_config_train = DATASET_FUNCTIONS_SDCoT[args.dataset_name][1](num_base_class = args.num_base_class, num_novel_class = args.num_novel_class)
-    dataset_config_base = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class)
-    dataset_config_val = DATASET_FUNCTIONS_BASE[args.dataset_name][1](num_base_class = args.num_base_class + args.num_novel_class)
+    dataset_builder_train = DATASET_FUNCTIONS_SDCoT[args.dataset_name][0]
+    dataset_builder_test = DATASET_FUNCTIONS_BASE[args.dataset_name][0]
+    dataset_config_train = DATASET_FUNCTIONS_SDCoT[args.dataset_name][1](
+        num_base_class=args.num_base_class, num_novel_class=args.num_novel_class)
+    dataset_config_base = DATASET_FUNCTIONS_BASE[args.dataset_name][1](
+        num_base_class=args.num_base_class)
+    dataset_config_val = DATASET_FUNCTIONS_BASE[args.dataset_name][1](
+        num_base_class=args.num_base_class + args.num_novel_class)
     # note that the val dataset covers both base and incremental classes
 
     dataset_dict = {
-        "train": dataset_builder(
+        "train": dataset_builder_train(
             dataset_config_train,
             split_set="train",
             root_dir=args.dataset_root_dir,
@@ -116,7 +127,7 @@ def build_dataset_SDCoT(args):
             use_color=args.use_color,
             augment=True
         ),
-        "test": dataset_builder(
+        "test": dataset_builder_test(
             dataset_config_val,
             split_set="val",
             root_dir=args.dataset_root_dir,

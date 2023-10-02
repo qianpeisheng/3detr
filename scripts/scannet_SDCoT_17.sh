@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copyright (c) Facebook, Inc. and its affiliates.
 
-CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT.py \
+CUDA_VISIBLE_DEVICES=3 python3 main_SDCoT.py \
 --dataset_name scannet \
 --num_base_class 17 \
 --num_novel_class 1 \
@@ -15,7 +15,7 @@ CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT.py \
 --loss_no_object_weight 0.25 \
 --save_separate_checkpoint_every_epoch 50 \
 --eval_every_epoch 50 \
---dataset_num_workers 1 \
---batchsize_per_gpu 1 \
+--dataset_num_workers 4 \
+--batchsize_per_gpu 8 \
 --checkpoint_dir ckpts_scannet/scannet_SDCoT_17 \
 --checkpoint_name checkpoint_best_6270.pth

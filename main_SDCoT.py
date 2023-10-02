@@ -20,6 +20,7 @@ from utils.dist import init_distributed, is_distributed, is_primary, get_rank, b
 from utils.misc import my_worker_init_fn
 from utils.io import save_checkpoint, resume_if_possible, resume_if_possible_SDCoT
 from utils.logger import Logger
+from utils.ap_calculator import get_ap_config_dict
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -392,13 +393,11 @@ def main(local_rank, args):
 
     # For the train set, set the base detector
     datasets['train'].set_base_detector(base_detection_model)
-    temp_input = datasets['train'][0]
-    import pdb
-    pdb.set_trace()
-    temp = datasets['train'].generate_pseudo_labels(
-        temp_input['point_clouds'], temp_input['point_cloud_dims_min'], temp_input['point_cloud_dims_max'])
-    # temp['outputs'].keys()
-    # need to implement parse_prediction_to_pseudo_bboxes from SDCoT
+    ap_config_dict = get_ap_config_dict(
+        dataset_config=dataset_config_train, remove_empty_box=True
+    )
+    # set set_ap_config_dict
+    datasets['train'].set_ap_config_dict(ap_config_dict)
 
     model, _ = build_model(args, dataset_config_train)
     model = model.cuda(local_rank)

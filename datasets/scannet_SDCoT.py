@@ -224,7 +224,7 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         num_points=40000,
         use_color=False,
         use_height=False,
-        augment=False,
+        augment=False,  # True for training, False for testing
         use_random_cuboid=True,
         random_cuboid_min_points=30000,
     ):
@@ -323,6 +323,17 @@ class ScannetDetectionDataset_SDCoT(Dataset):
 
         return parsed_predictions
 
+    def pseudo_label_to_instance_bbox(self, pseudo_label):
+        # pseudo_label is a list of length 3. The first element is the class index.
+        # The second element is an array of (8, 3), which is the x,y,z coordinates of 8 corners of the bounding box.
+        # The third element is the probality of the class.
+        instance_bbox = np.zeros((7, ))
+        instance_bbox[0:3] = pseudo_label[1].mean(axis=0)
+        instance_bbox[3:6] = pseudo_label[1].max(
+            axis=0) - pseudo_label[1].min(axis=0)
+        instance_bbox[6] = pseudo_label[0]
+        return instance_bbox
+
     def set_ap_config_dict(self, ap_config_dict):
         self.ap_config_dict = ap_config_dict
 
@@ -384,15 +395,6 @@ class ScannetDetectionDataset_SDCoT(Dataset):
             point_cloud, self.num_points, return_choices=True
         )
 
-        # obtain pseudo labels
-        # pseudo_labels = self.generate_pseudo_labels(
-        #     point_cloud,
-        #     point_cloud.min(axis=0)[:3],
-        #     point_cloud.max(axis=0)[:3]
-        # )
-        # return pseudo_labels, instance_bboxes
-        # for pseudo_label in pseudo_labels:
-
         instance_labels = instance_labels[choices]
         semantic_labels = semantic_labels[choices]
 
@@ -407,7 +409,7 @@ class ScannetDetectionDataset_SDCoT(Dataset):
 
         pcl_color = pcl_color[choices]
 
-        target_bboxes_mask[0: instance_bboxes.shape[0]] = 1
+        # save instance_bboxes without class labels
         target_bboxes[0: instance_bboxes.shape[0], :] = instance_bboxes[:, 0:6]
 
         # ------------------------------- DATA AUGMENTATION ------------------------------
@@ -432,6 +434,44 @@ class ScannetDetectionDataset_SDCoT(Dataset):
             target_bboxes = self.dataset_config.rotate_aligned_boxes(
                 target_bboxes, rot_mat
             )
+
+        # to obtain pseudo labels
+        pseudo_labels = self.generate_pseudo_labels(
+            point_cloud,
+            point_cloud.min(axis=0)[:3],
+            point_cloud.max(axis=0)[:3]
+        )
+
+        # Convert the pseudo labels to the format of instance_bboxes
+        converted_instance_bboxes = []
+        for pseudo_label in pseudo_labels[0]:
+            converted_instance_bboxes.append(
+                self.pseudo_label_to_instance_bbox(pseudo_label))
+
+        # make sure converted_instance_bboxes is no more than MAX_NUM_OBJ - the number of instance_bboxes
+        if len(converted_instance_bboxes) > MAX_NUM_OBJ - instance_bboxes.shape[0]:
+            print(
+                'Warning: converted_instance_bboxes is more than MAX_NUM_OBJ - the number of instance_bboxes')
+            converted_instance_bboxes = converted_instance_bboxes[0: MAX_NUM_OBJ -
+                                                                  instance_bboxes.shape[0]]
+
+        # concat converted_instance_bboxes and instance_bboxes
+        converted_instance_bboxes_no_cls = [
+            converted_instance_bbox[0:6] for converted_instance_bbox in converted_instance_bboxes]
+
+        # pseudo labels are added to the front of the instance_bboxes
+        # if converted_instance_bboxes is empty, skip this step
+        if len(converted_instance_bboxes) > 0:
+            target_bboxes = np.concatenate(
+                (converted_instance_bboxes_no_cls, target_bboxes), axis=0)
+
+        # make sure target_bboxes is no more than MAX_NUM_OBJ
+        # this line will always trigger because target_bboxes is already MAX_NUM_OBJ
+        # but the truncated values are all zeros
+        target_bboxes = target_bboxes[0: MAX_NUM_OBJ]
+
+        # the mask includes both pseudo labels and instance labels
+        target_bboxes_mask[0: target_bboxes.shape[0]] = 1
 
         raw_sizes = target_bboxes[:, 3:6]
         point_cloud_dims_min = point_cloud.min(axis=0)[:3]
@@ -473,10 +513,22 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         ret_dict["gt_angle_class_label"] = angle_classes.astype(np.int64)
         ret_dict["gt_angle_residual_label"] = angle_residuals.astype(np.float32)
         target_bboxes_semcls = np.zeros((MAX_NUM_OBJ))
-        target_bboxes_semcls[0: instance_bboxes.shape[0]] = [
+
+        # Do it differently for pseudo labels and instance labels.
+        # No need to convert pseudo label classes because they are already mapped.
+        # For instance labels, we need to map them to the new class ids.
+        target_bboxes_semcls[0: len(converted_instance_bboxes)
+                             ] = [converted_instance_bbox[-1] for converted_instance_bbox in converted_instance_bboxes]
+        target_bboxes_semcls[len(converted_instance_bboxes): len(converted_instance_bboxes) + instance_bboxes.shape[0]] = [
             self.dataset_config.nyu40id2class[int(x)]
             for x in instance_bboxes[:, -1][0: instance_bboxes.shape[0]]
         ]
+
+        # target_bboxes_semcls[0: instance_bboxes.shape[0]] = [
+        #     self.dataset_config.nyu40id2class[int(x)]
+        #     for x in instance_bboxes[:, -1][0: instance_bboxes.shape[0]]
+        # ]
+
         ret_dict["gt_box_sem_cls_label"] = target_bboxes_semcls.astype(np.int64)
         ret_dict["gt_box_present"] = target_bboxes_mask.astype(np.float32)
         ret_dict["scan_idx"] = np.array(idx).astype(np.int64)

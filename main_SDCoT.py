@@ -221,7 +221,7 @@ def do_train(
         )
 
         metrics = aps.compute_metrics()
-        metric_str = aps.metrics_to_str(metrics, per_class=False)
+        metric_str = aps.metrics_to_str(metrics, per_class=True)
         metrics_dict = aps.metrics_to_dict(metrics)
         curr_iter = epoch * len(dataloaders["train"])
         if is_primary():
@@ -421,13 +421,24 @@ def main(local_rank, args):
         model.state_dict()['mlp_heads.sem_cls_head.layers.8.bias'][:old_cls_size,
                                                                    ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.bias']
 
+        # swap the last and the old_cls_size-1 th class weights because the last class is the background class
+        model.state_dict()['mlp_heads.sem_cls_head.layers.8.weight'][-1,
+                                                                        ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.weight'][-1, ...]
+        model.state_dict()['mlp_heads.sem_cls_head.layers.8.bias'][-1,
+                                                                    ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.bias'][-1, ...]
+        model.state_dict()['mlp_heads.sem_cls_head.layers.8.weight'][old_cls_size - 1,
+                                                                        ...] *= 0.
+        model.state_dict()['mlp_heads.sem_cls_head.layers.8.bias'][old_cls_size - 1,
+                                                                    ...] *= 0.
+
         # remove mlp_heads.sem_cls_head.layers.8.weight and bias from the state dict
         _stat_dict.pop('mlp_heads.sem_cls_head.layers.8.weight')
         _stat_dict.pop('mlp_heads.sem_cls_head.layers.8.bias')
         # _state_dict does not contain the classifier weights
         model.load_state_dict(_stat_dict, strict=False)
+        return model
 
-    load_except_classifier(model, base_detection_model)
+    model = load_except_classifier(model, base_detection_model)
     # model.load_state_dict(base_detection_model.state_dict(), strict=False)
 
     if is_distributed():

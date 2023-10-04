@@ -333,7 +333,10 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
         sys.exit(1)
 
     sd = torch.load(args.test_ckpt, map_location=torch.device("cpu"))
-    model_no_ddp.load_state_dict(sd["model"])
+
+    # we already loaded the base detection model weights to the model partially
+    if args.test_only:
+        model_no_ddp.load_state_dict(sd["model"])
     logger = Logger()
     criterion_val = None  # do not compute loss for speed-up; Comment out to see test loss
     epoch = -1
@@ -388,9 +391,10 @@ def main(local_rank, args):
     base_detection_model, _ = build_model(args, dataset_config_base)
     base_detection_model = base_detection_model.cuda(local_rank)  # TODO add ddp
     # load the base detection model
-    resume_if_possible(
-        checkpoint_dir=args.checkpoint_dir, model_no_ddp=base_detection_model, optimizer=None, checkpoint_name=args.checkpoint_name
-    )
+    if not args.test_only:
+        resume_if_possible(
+            checkpoint_dir=args.checkpoint_dir, model_no_ddp=base_detection_model, optimizer=None, checkpoint_name=args.checkpoint_name
+        )
 
     # For the train set, set the base detector
     datasets['train'].set_base_detector(base_detection_model)
@@ -438,7 +442,9 @@ def main(local_rank, args):
         model.load_state_dict(_stat_dict, strict=False)
         return model
 
-    model = load_except_classifier(model, base_detection_model)
+    # if not test only load the base detection model weights to the model partially
+    if not args.test_only:
+        model = load_except_classifier(model, base_detection_model)
     # model.load_state_dict(base_detection_model.state_dict(), strict=False)
 
     if is_distributed():
@@ -494,13 +500,14 @@ def main(local_rank, args):
             num_cls_base=args.num_base_class
         )
 
+        # freeze is not used for SDCoT
         # freeze all model parameters except classifier weights
-        if args.freeze:
-            for name, param in model_no_ddp.named_parameters():
-                if 'mlp_heads' not in name:
-                    param.requires_grad = False
-                else:
-                    print('not freezing ', name)
+        # if args.freeze:
+        #     for name, param in model_no_ddp.named_parameters():
+        #         if 'mlp_heads' not in name:
+        #             param.requires_grad = False
+        #         else:
+        #             print('not freezing ', name)
 
         args.start_epoch = loaded_epoch + 1
         do_train(

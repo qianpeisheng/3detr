@@ -17,7 +17,5 @@ CUDA_VISIBLE_DEVICES=0 python3 main_SDCoT.py \
 --eval_every_epoch 50 \
 --dataset_num_workers 8 \
 --batchsize_per_gpu 16 \
---checkpoint_dir ckpts_scannet/scannet_SDCoT_9_9 \
---checkpoint_name checkpoint_best_6198.pth \
 --test_only \
---test_ckpt ckpts_scannet/scannet_base_train_novel_9/checkpoint_best.pth
+--test_ckpt ckpts_scannet/scannet_SDCoT_9_9/checkpoint_0450.pth

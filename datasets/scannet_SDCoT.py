@@ -328,9 +328,22 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         # The second element is an array of (8, 3), which is the x,y,z coordinates of 8 corners of the bounding box.
         # The third element is the probality of the class.
         instance_bbox = np.zeros((7, ))
-        instance_bbox[0:3] = pseudo_label[1].mean(axis=0)
-        instance_bbox[3:6] = pseudo_label[1].max(
-            axis=0) - pseudo_label[1].min(axis=0)
+        instance_bbox[0] = pseudo_label[1][:, 0].mean(axis=0)
+        # swap instance_bbox[1] and instance_bbox[2], and time -1 to instance_bbox[2]
+        # to convert from SDCoT format to 3DETR format
+        instance_bbox[1] = pseudo_label[1][:, 2].mean(axis=0)
+        instance_bbox[2] = pseudo_label[1][:, 1].mean(axis=0) * -1
+
+        # dx is the same, but dy and dz are swapped
+        instance_bbox[3] = pseudo_label[1][:, 0].max(
+            axis=0) - pseudo_label[1][:, 0].min(axis=0)
+        instance_bbox[4] = pseudo_label[1][:, 2].max(
+            axis=0) - pseudo_label[1][:, 2].min(axis=0)
+        instance_bbox[5] = pseudo_label[1][:, 1].max(
+            axis=0) - pseudo_label[1][:, 1].min(axis=0)
+
+        # instance_bbox[3:6] = pseudo_label[1].max(
+        #     axis=0) - pseudo_label[1].min(axis=0)
         instance_bbox[6] = pseudo_label[0]
         return instance_bbox
 
@@ -353,9 +366,9 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         instance_bboxes = np.load(os.path.join(
             self.data_path, scan_name) + "_bbox.npy")
         # Filter instance_bboxes and keep only those with classes that are in the dataset_config
-        instance_bboxes = instance_bboxes[
-            np.isin(instance_bboxes[:, -1], self.dataset_config.nyu40ids_novel)
-        ]
+        # instance_bboxes = instance_bboxes[
+        #     np.isin(instance_bboxes[:, -1], self.dataset_config.nyu40ids_novel)
+        # ]
 
         if not self.use_color:
             point_cloud = mesh_vertices[:, 0:3]  # do not use color for now
@@ -538,8 +551,11 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         ret_dict["gt_box_sem_cls_label"] = target_bboxes_semcls.astype(np.int64)
         ret_dict["gt_box_present"] = target_bboxes_mask.astype(np.float32)
         ret_dict["scan_idx"] = np.array(idx).astype(np.int64)
+        # ret_dict['scan_name'] = scan_name
+        # ret_dict['num_pseudo_label'] = len(converted_instance_bboxes)
         ret_dict["pcl_color"] = pcl_color
         ret_dict["gt_box_sizes"] = raw_sizes.astype(np.float32)
+        # ret_dict['pseudo_labels'] = pseudo_labels
         ret_dict["gt_box_sizes_normalized"] = box_sizes_normalized.astype(
             np.float32)
         ret_dict["gt_box_angles"] = raw_angles.astype(np.float32)

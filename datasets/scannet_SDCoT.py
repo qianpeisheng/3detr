@@ -311,6 +311,11 @@ class ScannetDetectionDataset_SDCoT(Dataset):
 
         with torch.no_grad():
             outputs = self.base_detector(batch_data_label)
+            # if outputs is a list, set outputs to the first element
+            if isinstance(outputs, list) or isinstance(outputs, tuple):
+                outputs = outputs[0]
+            # This is to cater for distillation
+
             parsed_predictions = parse_predictions_SDCoT(
                 predicted_boxes=outputs['outputs']['box_corners'],
                 sem_cls_probs=outputs['outputs']['sem_cls_prob'],

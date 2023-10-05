@@ -245,7 +245,8 @@ def do_train(
                 best_val_metrics,
             )
 
-        if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1):
+        if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1) or epoch == 1:
+            # evaluate the model at epoch 1 for sanity check
 
             ap_calculator = evaluate_incremental(
                 args,
@@ -395,6 +396,12 @@ def main(local_rank, args):
         resume_if_possible(
             checkpoint_dir=args.checkpoint_dir, model_no_ddp=base_detection_model, optimizer=None, checkpoint_name=args.checkpoint_name
         )
+
+    # set base detection model to eval mode
+    base_detection_model.eval()
+    # freeze all base detection model parameters
+    for name, param in base_detection_model.named_parameters():
+        param.requires_grad = False
 
     # For the train set, set the base detector
     datasets['train'].set_base_detector(base_detection_model)

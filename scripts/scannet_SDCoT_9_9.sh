@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copyright (c) Facebook, Inc. and its affiliates.
 
-CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT.py \
+CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT_pseudo_only.py \
 --dataset_name scannet \
 --num_base_class 9 \
 --num_novel_class 9 \

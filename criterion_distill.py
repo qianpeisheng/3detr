@@ -330,7 +330,7 @@ class SetCriterion(nn.Module):
             size_loss = torch.zeros(1, device=pred_box_sizes.device).squeeze()
         return {"loss_size": size_loss}
 
-    def single_output_forward(self, outputs, targets, outputs_static):
+    def single_output_forward(self, outputs, targets, outputs_static=None):
         gious = generalized_box3d_iou(
             outputs["box_corners"],
             targets["gt_box_corners"],
@@ -358,22 +358,30 @@ class SetCriterion(nn.Module):
                 # certain losses like cardinality are only logged and have no loss weight
                 # use static outputs for distillation loss
                 if k == "loss_distill":
-                    # print(k, " Using static outputs for distillation loss")
-                    curr_loss = self.loss_functions[k](
-                        outputs, outputs_static, assignments)
+                    if outputs_static is None:
+                        # during evaluation outputs_static is None, and there is no distillation loss.
+                        # curr_loss = torch.zeros(1, device='cuda:0') # dummy loss TODO: does not work with multi-gpu
+                        curr_loss = None
+                    else:
+                        # print(k, " Using static outputs for distillation loss")
+                        curr_loss = self.loss_functions[k](
+                            outputs, outputs_static, assignments)
                 else:
                     curr_loss = self.loss_functions[k](
                         outputs, targets, assignments)
-                losses.update(curr_loss)
+                    
+                if curr_loss is not None:
+                    losses.update(curr_loss)
 
         final_loss = 0
         for k in self.loss_weight_dict:
-            if self.loss_weight_dict[k] > 0:
-                losses[k.replace("_weight", "")] *= self.loss_weight_dict[k]
-                final_loss += losses[k.replace("_weight", "")]
+            loss_name = k.replace("_weight", "")
+            if self.loss_weight_dict[k] > 0 and loss_name in losses:
+                    losses[loss_name] *= self.loss_weight_dict[k]
+                    final_loss += losses[loss_name]
         return final_loss, losses
 
-    def forward(self, outputs, targets, outputs_static):
+    def forward(self, outputs, targets, outputs_static=None):
         nactual_gt = targets["gt_box_present"].sum(axis=1).long()
         num_boxes = torch.clamp(all_reduce_average(
             nactual_gt.sum()), min=1).item()

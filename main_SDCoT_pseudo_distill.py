@@ -251,7 +251,8 @@ def do_train(
                 best_val_metrics,
             )
 
-        if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1):
+        if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1) or epoch == 1:
+            # evaluate the model at epoch 1 for sanity check
 
             ap_calculator = evaluate_incremental(
                 args,
@@ -396,6 +397,13 @@ def main(local_rank, args):
     # define the base detection model and load weights
     base_detection_model, _ = build_model(args, dataset_config_base)
     base_detection_model = base_detection_model.cuda(local_rank)  # TODO add ddp
+
+    # set base detection model to eval mode
+    base_detection_model.eval()
+    # freeze all base detection model parameters
+    for name, param in base_detection_model.named_parameters():
+        param.requires_grad = False
+
     # load the base detection model
     if not args.test_only:
         resume_if_possible(

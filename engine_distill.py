@@ -93,9 +93,11 @@ def train_one_epoch(
         }
         outputs, query_xyz, pos_embed = model(inputs)
 
-        # feed pos_embed to static_teacher
-        outputs_static, query_xyz_static, pos_embed_static = static_teacher(
-            inputs=inputs, query_xyz=query_xyz, pos_embed=pos_embed)
+        # no gradient for static_teacher
+        with torch.no_grad():
+            # feed pos_embed to static_teacher; query_xyz and pos_embed are not used
+            outputs_static, query_xyz_static, pos_embed_static = static_teacher(
+                inputs=inputs, query_xyz=query_xyz, pos_embed=pos_embed)
 
         # Compute loss
         loss, loss_dict = criterion(outputs, batch_data_label, outputs_static)
@@ -268,12 +270,12 @@ def evaluate_incremental(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs = model(inputs)
+        outputs, _ , _ = model(inputs) # query_xyz and pos_embed are not used
 
         # Compute loss
         loss_str = ""
         if criterion is not None:
-            loss, loss_dict = criterion(outputs, batch_data_label)
+            loss, loss_dict = criterion(outputs=outputs, targets=batch_data_label, outputs_static=None) # outputs_static is not used
 
             loss_reduced = all_reduce_average(loss)
             loss_dict_reduced = reduce_dict(loss_dict)

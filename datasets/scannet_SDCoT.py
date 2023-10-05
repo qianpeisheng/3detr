@@ -370,10 +370,11 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         )
         instance_bboxes = np.load(os.path.join(
             self.data_path, scan_name) + "_bbox.npy")
+        
         # Filter instance_bboxes and keep only those with classes that are in the dataset_config
-        # instance_bboxes = instance_bboxes[
-        #     np.isin(instance_bboxes[:, -1], self.dataset_config.nyu40ids_novel)
-        # ]
+        instance_bboxes = instance_bboxes[
+            np.isin(instance_bboxes[:, -1], self.dataset_config.nyu40ids_novel)
+        ]
 
         if not self.use_color:
             point_cloud = mesh_vertices[:, 0:3]  # do not use color for now

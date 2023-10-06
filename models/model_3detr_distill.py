@@ -149,6 +149,7 @@ class Model3DETR(nn.Module):
         )
         # Semantic class of the box
         if hasattr(dataset_config, 'num_semcls_novel'):
+            # TODO  Deprecated. Remove this branch.
             # semcls_head should output num_novel_class + 1 classes
             # but we load the weights and bias of the base model to the current model
             # and will deroll the weights and bias.
@@ -204,10 +205,10 @@ class Model3DETR(nn.Module):
             1, 2).contiguous() if pc.size(-1) > 3 else None
         return xyz, features
 
-    def run_encoder(self, point_clouds):
+    def run_encoder(self, point_clouds, student_inds=None, interim_inds=None):
         xyz, features = self._break_up_pc(point_clouds)
         pre_enc_xyz, pre_enc_features, pre_enc_inds = self.pre_encoder(
-            xyz, features)
+            xyz=xyz, features=features, inds=student_inds)
         # xyz: batch x npoints x 3
         # features: batch x channel x npoints
         # inds: batch x npoints
@@ -217,15 +218,36 @@ class Model3DETR(nn.Module):
 
         # xyz points are in batch x npointx channel order
         enc_xyz, enc_features, enc_inds = self.encoder(
-            pre_enc_features, xyz=pre_enc_xyz
+            src=pre_enc_features, xyz=pre_enc_xyz, interim_inds=interim_inds
         )
-        if enc_inds is None:
-            # encoder does not perform any downsampling
-            enc_inds = pre_enc_inds
+
+        if student_inds is not None:
+            # for static teacher 
+            if enc_inds is None:
+                # encoder does not perform any downsampling, vallina 3DETR
+                enc_inds = pre_enc_inds
+            # else:
+                # masked encoder
+                # use gather here to ensure that it works for both FPS and random sampling
+                # enc_inds = torch.gather(pre_enc_inds, 1, enc_inds.type(torch.int64))
+                # the line above works because enc_inds is a subset of pre_enc_inds
+
+            # the returned pre_enc_inds and enc_inds from the static steacher are not used.
+            return enc_xyz, enc_features, pre_enc_inds, enc_inds
+        
         else:
-            # use gather here to ensure that it works for both FPS and random sampling
-            enc_inds = torch.gather(pre_enc_inds, 1, enc_inds.type(torch.int64))
-        return enc_xyz, enc_features, enc_inds
+            # for student
+            if enc_inds is None:
+                # encoder does not perform any downsampling, vanilla 3DETR
+                enc_inds = pre_enc_inds
+            # else:
+                # use gather here to ensure that it works for both FPS and random sampling
+                # enc_inds = torch.gather(pre_enc_inds, 1, enc_inds.type(torch.int64))
+            # Note that we do not gather because end_inds from masked student encoder 
+            # is used to index the pre_enc_inds from the static teacher.
+            # This is different from original 3DETR.
+            
+            return enc_xyz, enc_features, pre_enc_inds, enc_inds
 
     def get_box_predictions(self, query_xyz, point_cloud_dims, box_features):
         """
@@ -329,10 +351,14 @@ class Model3DETR(nn.Module):
             "aux_outputs": aux_outputs,  # output from intermediate layers of decoder
         }
 
-    def forward(self, inputs, query_xyz=None, pos_embed=None, encoder_only=False):
+    def forward(self, inputs, query_xyz=None, pos_embed=None, encoder_only=False, student_inds=None, interim_inds=None):
         point_clouds = inputs["point_clouds"]
-
-        enc_xyz, enc_features, enc_inds = self.run_encoder(point_clouds)
+        
+        is_static_teacher = pos_embed is not None
+        if is_static_teacher:
+            enc_xyz, enc_features, pre_enc_inds, interim_inds = self.run_encoder(point_clouds=point_clouds, student_inds=student_inds, interim_inds=interim_inds)
+        else:
+            enc_xyz, enc_features, pre_enc_inds, interim_inds = self.run_encoder(point_clouds=point_clouds)
         enc_features = self.encoder_to_decoder_projection(
             enc_features.permute(1, 2, 0)
         ).permute(2, 0, 1)
@@ -348,7 +374,7 @@ class Model3DETR(nn.Module):
             inputs["point_cloud_dims_max"],
         ]
 
-        if pos_embed is None:
+        if not is_static_teacher:
             query_xyz, query_embed, pos_embed = self.get_query_embeddings(
                 enc_xyz, point_cloud_dims)
         else:
@@ -368,7 +394,7 @@ class Model3DETR(nn.Module):
         box_predictions = self.get_box_predictions(
             query_xyz, point_cloud_dims, box_features
         )
-        return box_predictions, query_xyz, pos_embed
+        return box_predictions, query_xyz, pos_embed, pre_enc_inds, interim_inds
 
     def enroll_weights(self, base_weights, base_bias):
         '''

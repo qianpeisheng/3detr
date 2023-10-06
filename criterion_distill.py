@@ -124,10 +124,15 @@ class SetCriterion(nn.Module):
         return {"loss_cardinality": card_err}
 
     def loss_distill(self, outputs, targets, assignments=None):
+        # TODO try to include background class in distillation loss
         # distillation loss
-        # TODO which loss to use?
+        output_cls_logits = outputs["sem_cls_logits"][..., :targets["outputs"]["sem_cls_logits"].shape[-1] - 1]
+        target_cls_logits = targets["outputs"]["sem_cls_logits"][..., :-1]
+        # normalize logits
+        output_cls_logits = output_cls_logits - torch.mean(output_cls_logits, dim=-1, keepdim=True)
+        target_cls_logits = target_cls_logits - torch.mean(target_cls_logits, dim=-1, keepdim=True)
         distill_loss = F.mse_loss(
-            outputs["sem_cls_logits"][..., :targets["outputs"]["sem_cls_logits"].shape[-1] - 1], targets["outputs"]["sem_cls_logits"][..., :-1])
+            output_cls_logits, target_cls_logits)
         # -1 because last class is no-object
         return {"loss_distill": distill_loss}
 

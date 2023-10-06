@@ -91,13 +91,18 @@ def train_one_epoch(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs, query_xyz, pos_embed = model(inputs)
+        outputs, query_xyz, pos_embed, enc_inds, interim_inds = model(inputs)
+        # query_xyz and pos_embed are for static teacher to use the same query points and pos_embed as the student
+        # end_inds is for the static teacher to use the same points after pre-encoder as the student
+        # interim_inds is for the static teacher to use the same points after encoder as the student (optional)
+        # because vallina transformer does not have point downsampling in the encoder, in which interim_inds is the same as enc_inds.
+
 
         # no gradient for static_teacher
         with torch.no_grad():
             # feed pos_embed to static_teacher; query_xyz and pos_embed are not used
-            outputs_static, query_xyz_static, pos_embed_static = static_teacher(
-                inputs=inputs, query_xyz=query_xyz, pos_embed=pos_embed)
+            outputs_static, query_xyz_static, pos_embed_static, enc_inds_static, interim_inds_static = static_teacher(
+                inputs=inputs, query_xyz=query_xyz, pos_embed=pos_embed, student_inds=enc_inds, interim_inds=interim_inds)
 
         # Compute loss
         loss, loss_dict = criterion(outputs, batch_data_label, outputs_static)
@@ -190,7 +195,7 @@ def evaluate(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs = model(inputs)
+        outputs, _ , _, _, _ = model(inputs) # query_xyz and pos_embed are not used
 
         # Compute loss
         loss_str = ""
@@ -270,7 +275,7 @@ def evaluate_incremental(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs, _ , _ = model(inputs) # query_xyz and pos_embed are not used
+        outputs, _ , _, _, _ = model(inputs) # query_xyz, pos_embed and enc_inds are not used
 
         # Compute loss
         loss_str = ""

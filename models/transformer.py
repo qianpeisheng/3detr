@@ -40,6 +40,7 @@ class TransformerEncoder(nn.Module):
                 pos: Optional[Tensor] = None,
                 xyz: Optional [Tensor] = None,
                 transpose_swap: Optional[bool] = False,
+                interim_inds: Optional[Tensor] = None, # not used since no downsampling. This is just to keep the same interface
                 ):
         if transpose_swap:
             bs, c, h, w = src.shape
@@ -166,7 +167,7 @@ class MaskedTransformerEncoder(TransformerEncoder):
                 pos: Optional[Tensor] = None,
                 xyz: Optional [Tensor] = None,
                 transpose_swap: Optional[bool] = False,
-                ):
+                interim_inds: Optional[Tensor] = None,):
 
         if transpose_swap:
             bs, c, h, w = src.shape
@@ -194,7 +195,7 @@ class MaskedTransformerEncoder(TransformerEncoder):
             if idx == 0 and self.interim_downsampling:
                 # output is npoints x batch x channel. make batch x channel x npoints
                 output = output.permute(1, 2, 0)
-                xyz, output, xyz_inds = self.interim_downsampling(xyz, output)
+                xyz, output, xyz_inds = self.interim_downsampling(xyz=xyz, features=output, inds=interim_inds)
                 # swap back
                 output = output.permute(2, 0, 1)
 

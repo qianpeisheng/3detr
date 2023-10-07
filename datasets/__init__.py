@@ -145,9 +145,9 @@ def build_dataset_SDCoT(args):
 
 def build_dataset_Pseudo_EMA(args):
     # TODO The current implementation is not correct. the train dataset should not load base classes labels.
-    dataset_builder_train = ScannetDetectionDataset_Pseudo_EMA[args.dataset_name][0]
+    dataset_builder_train = DATASET_FUNCTIONS_Pseudo_EMA[args.dataset_name][0]
     dataset_builder_test = DATASET_FUNCTIONS_BASE[args.dataset_name][0]
-    dataset_config_train = ScannetDetectionDataset_Pseudo_EMA[args.dataset_name][1](
+    dataset_config_train = DATASET_FUNCTIONS_Pseudo_EMA[args.dataset_name][1](
         num_base_class=args.num_base_class, num_novel_class=args.num_novel_class)
     dataset_config_base = DATASET_FUNCTIONS_BASE[args.dataset_name][1](
         num_base_class=args.num_base_class)

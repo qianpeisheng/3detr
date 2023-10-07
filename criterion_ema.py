@@ -56,6 +56,33 @@ class Matcher(nn.Module):
 
     @torch.no_grad()
     def forward(self, outputs, targets):
+        '''
+        Args:
+            outputs: dict of torch.tensor
+                "sem_cls_prob": batch x nqueries x num_semcls tensor
+                "objectness_prob": batch x nqueries x 1 tensor
+                "center_dist": batch x nqueries x ngt tensor
+                "gious": batch x nqueries x ngt tensor
+            targets: dict of torch.tensor
+                "gt_box_sem_cls_label": batch x ngt tensor
+                "gt_box_centers_normalized": batch x ngt x 2 tensor
+                "gt_box_sizes_normalized": batch x ngt x 3 tensor
+                "gt_box_angles": batch x ngt tensor
+                "nactual_gt": batch tensor
+        Return:
+            assignments: dict of torch.tensor
+                "assignments": list of list of torch.tensor
+                    assignments[b] is a list of length nactual_gt[b] where each element is a
+                    torch.tensor of shape [2] containing the indices of the matched proposal
+                    and ground truth box.
+                "per_prop_gt_inds": batch x nqueries tensor
+                    per_prop_gt_inds[b, i] is the index of the ground truth box matched to
+                    proposal i.
+                "proposal_matched_mask": batch x nqueries tensor
+                    proposal_matched_mask[b, i] is 1 if proposal i is matched to a ground
+                    truth box and 0 otherwise.
+
+        '''
 
         batchsize = outputs["sem_cls_prob"].shape[0]
         nqueries = outputs["sem_cls_prob"].shape[1]
@@ -143,6 +170,9 @@ class SetCriterion(nn.Module):
             # this isn't used during training and is logged for debugging.
             # thus, this loss does not have a loss_weight associated with it.
             "loss_cardinality": self.loss_cardinality,
+            "loss_center_consistency": self.loss_center_consistency,
+            # 'loss_cls_consistency': self.loss_class_consistency,
+            # 'loss_size_consistency': self.loss_size_consistency,
         }
 
     @torch.no_grad()
@@ -156,23 +186,101 @@ class SetCriterion(nn.Module):
         card_err = F.l1_loss(pred_objects.float(), targets["nactual_gt"])
         return {"loss_cardinality": card_err}
 
-    def loss_center_consistency(self, outputs, targets):
+    def loss_center_consistency(self, outputs, ema_outputs, assignments, ema_assignments):
+        # TODO the following could be vectorized
+        # loop through assignments['assignments']
+        # for i in range(len(assignments['assignments'])):
+        #     t1 = assignments['assignments'][i]
+        #     sorted_indices = torch.argsort(t1[1])
+        #     # Reorder t1[0] and t1[1] based on the sorted indices
+        #     t1[0] = torch.index_select(t1[0], dim=0, index=sorted_indices)
+        #     t1[1] = torch.index_select(t1[1], dim=0, index=sorted_indices)
+
+        # for i in range(len(ema_assignments['assignments'])):
+        #     t1 = ema_assignments['assignments'][i]
+        #     sorted_indices = torch.argsort(t1[1])
+        #     # Reorder t1[0] and t1[1] based on the sorted indices
+        #     t1[0] = torch.index_select(t1[0], dim=0, index=sorted_indices)
+        #     t1[1] = torch.index_select(t1[1], dim=0, index=sorted_indices)
+
+        for i in range(len(assignments['assignments'])):
+            t1 = assignments['assignments'][i]
+            sorted_indices = torch.argsort(t1[1])
+            sorted_t1_0 = torch.index_select(t1[0], dim=0, index=sorted_indices)
+            sorted_t1_1 = torch.index_select(t1[1], dim=0, index=sorted_indices)
+            assignments['assignments'][i] = [sorted_t1_0, sorted_t1_1]
+
+        for i in range(len(ema_assignments['assignments'])):
+            t1 = ema_assignments['assignments'][i]
+            sorted_indices = torch.argsort(t1[1])
+            sorted_t1_0 = torch.index_select(t1[0], dim=0, index=sorted_indices)
+            sorted_t1_1 = torch.index_select(t1[1], dim=0, index=sorted_indices)
+            ema_assignments['assignments'][i] = [sorted_t1_0, sorted_t1_1]
+
+        # assignments['assignments'][0] = assignments['assignments'][0].sort()[0]
         center = outputs["center_normalized"]
-        return map_ind
+        ema_center = ema_outputs["center_normalized"]
 
-    def loss_class_consistency(self, outputs, targets):
-        #
-        return
+        center_dist_2 = torch.cdist(
+            center, ema_center, p=1
+        ) # the reverse has the same mean value
 
-    def loss_size_consistency(self, outputs, targets):
-        return
+        # Extract indices from assignments and ema_assignments
+        indices = [(i, assignments['assignments'][i][0], ema_assignments['assignments'][i][0]) for i in range(len(assignments['assignments']))]
+        return {"loss_center_consistency": sum(center_dist_2) / len(center_dist_2)}, indices#assignments, ema_assignments # magnitude 8
+
+        import pdb; pdb.set_trace()
+        # Select elements from center_dist_2 based on the extracted indices
+        selected_elements = [center_dist_2[i, assignments_index, ema_assignments_index] for i, assignments_index, ema_assignments_index in indices]
+        center_consistency_loss = [selected_element.sum() for selected_element in selected_elements]
+        # center shape: (batch_size, nprop, 3), so is ema_center
+        # for each prediction in the batch, use the assignments to select the centers
+        # of the matched proposals. Repeat for ema_center.
+        # And calculate the distance between the two centers.
+        # # align ema_center to center based on the augmentations in outputs
+        # flip_x_axis = outputs["flip_x_axis"]
+        # flip_y_axis = outputs["flip_y_axis"]
+        # rot_mat = outputs["rot_mat"]
+        # inds_to_flip_x_axis = torch.nonzero(flip_x_axis).squeeze(1)
+        # inds_to_flip_y_axis = torch.nonzero(flip_y_axis).squeeze(1)
+
+        # # ema_center shape is (batch, nprop, 3)
+        # ema_center[inds_to_flip_x_axis,:, 0] = -ema_center[inds_to_flip_x_axis,:, 0]
+        # ema_center[inds_to_flip_y_axis, :, 1] = -ema_center[inds_to_flip_y_axis, :, 1]
+        # ema_center = torch.bmm(ema_center, rot_mat.transpose(1,2))
 
 
-    def loss_consistency(self, outputs, targets, assignments=None):
+
+        # referring to SESS, we only consider the matched proposals which are
+        # closest pairs of the two sets of proposals.
+
+
+        return {"loss_center_consistency": sum(center_consistency_loss) / len(center_consistency_loss)}, indices#assignments, ema_assignments # magnitude 8
+
+    def loss_class_consistency(self, outputs, ema_outputs, indices):
+        sem_cls_logits = outputs["sem_cls_logits"]
+        sem_cls_prob_log = F.log_softmax(sem_cls_logits, dim=-1) # for kl_div loss
+        ema_sem_cls_prob = ema_outputs["sem_cls_prob"]
+        sem_cls_aligned = [sem_cls_prob_log[i, assignments_index, :-1] for i, assignments_index, _ in indices] # -1 is the no-object class
+        ema_sem_cls_aligned = [ema_sem_cls_prob[i, ema_assignments_index] for i, _, ema_assignments_index in indices]
+        cls_consistency_loss = [F.kl_div(sem_cls_aligned[i], ema_sem_cls_aligned[i], reduction='mean') for i in range(sem_cls_logits.shape[0])]
+        return {"loss_cls_consistency": sum(cls_consistency_loss)/len(cls_consistency_loss)} # magnitude 0.0073
+
+    def loss_size_consistency(self, outputs, ema_outputs, indices):
+        output_sizes = outputs["size_normalized"]
+        ema_output_sizes = ema_outputs["size_normalized"]
+        size_aligned = [output_sizes[i, assignments_index] for i, assignments_index, _ in indices]
+        ema_size_aligned = [ema_output_sizes[i, ema_assignments_index] for i, _, ema_assignments_index in indices]
+        size_consistency_loss = [F.mse_loss(size_aligned[i], ema_size_aligned[i]) for i in range(output_sizes.shape[0])]
+
+        return {"loss_size_consistency": sum(size_consistency_loss) / len(size_consistency_loss)} # magnitude 0.0121
+
+
+    def loss_consistency(self, outputs, ema_outputs, assignments, ema_assignments):
         # assignments is not used. It is only passed to keep the same function signature as other losses
-        loss_center_consistency = self.loss_center_consistency(outputs, targets)
-        loss_class_consistency = self.loss_class_consistency(outputs, targets)
-        loss_size_consistency = self.loss_size_consistency(outputs, targets)
+        loss_center_consistency, indices  = self.loss_center_consistency(outputs, ema_outputs, assignments, ema_assignments)
+        loss_class_consistency = self.loss_class_consistency(outputs, ema_outputs, indices)
+        loss_size_consistency = self.loss_size_consistency(outputs, ema_outputs, indices)
         loss_consistency = loss_center_consistency + loss_class_consistency + loss_size_consistency
         return {"loss_consistency": loss_consistency}
 
@@ -373,7 +481,7 @@ class SetCriterion(nn.Module):
             size_loss = torch.zeros(1, device=pred_box_sizes.device).squeeze()
         return {"loss_size": size_loss}
 
-    def single_output_forward(self, outputs, targets):
+    def single_output_forward(self, outputs, ema_outputs, targets):
         gious = generalized_box3d_iou(
             outputs["box_corners"],
             targets["gt_box_corners"],
@@ -389,6 +497,37 @@ class SetCriterion(nn.Module):
         outputs["center_dist"] = center_dist
         assignments = self.matcher(outputs, targets)
 
+        # revert augmentation for ema_outputs
+        flip_x_axis = outputs["flip_x_axis"]
+        flip_y_axis = outputs["flip_y_axis"]
+        rot_mat = outputs["rot_mat"]
+        inds_to_flip_x_axis = torch.nonzero(flip_x_axis).squeeze(1)
+        inds_to_flip_y_axis = torch.nonzero(flip_y_axis).squeeze(1)
+
+        # ema_outputs shape is (batch, nprop, 3)
+        ema_outputs["center_normalized"][inds_to_flip_x_axis,:, 0] = -ema_outputs["center_normalized"][inds_to_flip_x_axis,:, 0]
+        ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1] = -ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1]
+        ema_outputs["center_normalized"] = torch.bmm(ema_outputs["center_normalized"], rot_mat.transpose(1,2))
+
+        # calculate ema gious
+        ema_gious = generalized_box3d_iou(
+            ema_outputs["box_corners"],
+            targets["gt_box_corners"],
+            targets["nactual_gt"],
+            rotated_boxes=torch.any(targets["gt_box_angles"] > 0).item(),
+            needs_grad=(self.loss_weight_dict["loss_giou_weight"] > 0),
+        )
+        ema_outputs["gious"] = ema_gious
+
+        # calculate ema center dist
+        ema_center_dist = torch.cdist(
+            ema_outputs["center_normalized"], targets["gt_box_centers_normalized"], p=1
+        )
+        ema_outputs["center_dist"] = ema_center_dist
+
+        # assignments for ema
+        ema_assignments = self.matcher(ema_outputs, targets)
+
         losses = {}
 
         for k in self.loss_functions:
@@ -397,9 +536,14 @@ class SetCriterion(nn.Module):
                 loss_wt_key in self.loss_weight_dict
                 and self.loss_weight_dict[loss_wt_key] > 0
             ) or loss_wt_key not in self.loss_weight_dict:
-                # only compute losses with loss_wt > 0
-                # certain losses like cardinality are only logged and have no loss weight
-                curr_loss = self.loss_functions[k](outputs, targets, assignments)
+                if 'center_consistency' in k:
+                    curr_loss, indices = self.loss_functions[k](outputs, ema_outputs, assignments, ema_assignments)
+                elif 'cls_consistency' in k or 'size_consistency' in k:
+                    curr_loss = self.loss_functions[k](outputs, ema_outputs, indices)
+                else:
+                    # only compute losses with loss_wt > 0
+                    # certain losses like cardinality are only logged and have no loss weight
+                    curr_loss = self.loss_functions[k](outputs, targets, assignments)
                 losses.update(curr_loss)
 
         final_loss = 0
@@ -409,7 +553,7 @@ class SetCriterion(nn.Module):
                 final_loss += losses[k.replace("_weight", "")]
         return final_loss, losses
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, ema_outputs, targets):
         nactual_gt = targets["gt_box_present"].sum(axis=1).long()
         num_boxes = torch.clamp(all_reduce_average(nactual_gt.sum()), min=1).item()
         targets["nactual_gt"] = nactual_gt
@@ -418,12 +562,19 @@ class SetCriterion(nn.Module):
             "num_boxes_replica"
         ] = nactual_gt.sum().item()  # number of boxes on this worker for dist training
 
-        loss, loss_dict = self.single_output_forward(outputs["outputs"], targets)
+        loss, loss_dict = self.single_output_forward(outputs=outputs["outputs"],
+                            ema_outputs=ema_outputs['outputs'], targets=targets)
 
         if "aux_outputs" in outputs:
             for k in range(len(outputs["aux_outputs"])):
+
+                # update aux_outputs with the same augmentations as outputs
+                outputs["aux_outputs"][k]["flip_x_axis"] = outputs["outputs"]["flip_x_axis"]
+                outputs["aux_outputs"][k]["flip_y_axis"] = outputs["outputs"]["flip_y_axis"]
+                outputs["aux_outputs"][k]["rot_mat"] = outputs["outputs"]["rot_mat"]
+
                 interm_loss, interm_loss_dict = self.single_output_forward(
-                    outputs["aux_outputs"][k], targets
+                    outputs=outputs["aux_outputs"][k], ema_outputs=ema_outputs['outputs'], targets=targets
                 )
 
                 loss += interm_loss
@@ -449,7 +600,9 @@ def build_criterion(args, dataset_config):
         "loss_center_weight": args.loss_center_weight,
         "loss_size_weight": args.loss_size_weight,
         # consistency
-        'loss_consistency_weight': args.loss_ema_weight,
+        'loss_center_consistency_weight': args.loss_center_consistency_weight,
+        # 'loss_cls_consistency_weight': args.loss_cls_consistency_weight,
+        # 'loss_size_consistency_weight': args.loss_size_consistency_weight,
     }
     criterion = SetCriterion(matcher, dataset_config, loss_weight_dict)
     return criterion

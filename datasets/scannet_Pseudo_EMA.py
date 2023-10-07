@@ -415,7 +415,7 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
         )
 
         # repeat random sampling to get ema_point_cloud
-        ema_point_cloud, _ = pc_util.random_sampling(
+        ema_point_cloud = pc_util.random_sampling(
             point_cloud, self.num_points, return_choices=False
         )
 
@@ -480,6 +480,8 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
         # but the truncated values are all zeros
         target_bboxes = target_bboxes[0: MAX_NUM_OBJ]
 
+        flip_x_axis = 0
+        flip_y_axis = 0
         # ------------------------------- DATA AUGMENTATION ------------------------------
         if self.augment:
 
@@ -496,8 +498,10 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
                 target_bboxes[:, 1] = -1 * target_bboxes[:, 1]
 
             # Rotation along up-axis/Z-axis
-            rot_angle = (np.random.random() * np.pi / 18) - \
-                np.pi / 36  # -5 ~ +5 degree
+            # debug rot_angle, set to 0
+            rot_angle = 0.
+            # rot_angle = (np.random.random() * np.pi / 18) - \
+            #     np.pi / 36  # -5 ~ +5 degree
             rot_mat = pc_util.rotz(rot_angle)
             point_cloud[:, 0:3] = np.dot(
                 point_cloud[:, 0:3], np.transpose(rot_mat))

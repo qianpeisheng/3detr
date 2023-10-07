@@ -87,17 +87,25 @@ def train_one_epoch(
         }
 
         outputs = model(inputs)
+        # Add augmentation related information to outputs to facilitate consistency loss computation.
+        outputs['outputs']['flip_x_axis'] = batch_data_label['flip_x_axis']
+
+        # check if flip_x_axis is correct
+        print(outputs['outputs']['flip_x_axis'])
+        outputs['outputs']['flip_y_axis'] = batch_data_label['flip_y_axis']
+        outputs['outputs']['rot_mat'] = batch_data_label['rot_mat']
 
         # EMA forward pass
         ema_inputs = {
-            "point_clouds": batch_data_label["point_clouds"],
-            "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
-            "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
+            "point_clouds": batch_data_label["ema_point_clouds"],
+            "point_cloud_dims_min": batch_data_label["ema_point_cloud_dims_min"],
+            "point_cloud_dims_max": batch_data_label["ema_point_cloud_dims_max"],
         }
         ema_outputs = ema_model(ema_inputs)
 
         # Compute loss
-        loss, loss_dict = criterion(outputs, batch_data_label)
+        loss, loss_dict = criterion(outputs=outputs, ema_outputs=ema_outputs,
+                                    targets=batch_data_label)
         loss_reduced = all_reduce_average(loss)
         loss_dict_reduced = reduce_dict(loss_dict)
 
@@ -128,7 +136,7 @@ def train_one_epoch(
             eta_seconds = (max_iters - curr_iter) * time_delta.avg
             eta_str = str(datetime.timedelta(seconds=int(eta_seconds)))
             print(
-                f"Epoch [{curr_epoch}/{args.max_epoch}]; Iter [{curr_iter}/{max_iters}]; Loss {loss_avg.avg:0.2f}; LR {curr_lr:0.2e}; Iter time {time_delta.avg:0.2f}; ETA {eta_str}; Mem {mem_mb:0.2f}MB"
+                f"Epoch [{curr_epoch}/{args.max_epoch}]; Iter [{curr_iter}/{max_iters}]; Loss {loss_avg.avg:0.2f}; Center_con {loss_dict_reduced['loss_center_consistency_weight']:.3f}; Cls_con {loss_dict_reduced['loss_cls_consistency_weight']:.3f}; Size_con {loss_dict_reduced['loss_size_consistency_weight']:.3f}; LR {curr_lr:0.2e}; Iter time {time_delta.avg:0.2f}; ETA {eta_str}; Mem {mem_mb:0.2f}MB"
             )
             logger.log_scalars(loss_dict_reduced, curr_iter, prefix="Train_details/")
 
@@ -230,6 +238,7 @@ def evaluate_incremental(
     args,
     curr_epoch,
     model,
+    ema_model,
     criterion,
     dataset_config,
     dataset_loader,
@@ -255,6 +264,11 @@ def evaluate_incremental(
     barrier()
     epoch_str = f"[{curr_epoch}/{args.max_epoch}]" if curr_epoch > 0 else ""
 
+    # EMA forward pass
+    ema_model.eval()
+    barrier()
+
+
     for batch_idx, batch_data_label in enumerate(dataset_loader):
         curr_time = time.time()
         for key in batch_data_label:
@@ -266,11 +280,26 @@ def evaluate_incremental(
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
         outputs = model(inputs)
+        # Add augmentation related information to outputs to facilitate consistency loss computation.
+        outputs['outputs']['flip_x_axis'] = batch_data_label['flip_x_axis']
+        outputs['outputs']['flip_y_axis'] = batch_data_label['flip_y_axis']
+        outputs['outputs']['rot_mat'] = batch_data_label['rot_mat']
+
+        # EMA forward pass
+        ema_inputs = {
+            "point_clouds": batch_data_label["ema_point_clouds"],
+            "point_cloud_dims_min": batch_data_label["ema_point_cloud_dims_min"],
+            "point_cloud_dims_max": batch_data_label["ema_point_cloud_dims_max"],
+        }
+        ema_outputs = ema_model(ema_inputs)
 
         # Compute loss
         loss_str = ""
         if criterion is not None:
-            loss, loss_dict = criterion(outputs, batch_data_label)
+            # loss, loss_dict = criterion(outputs, batch_data_label)
+            # Compute loss
+            loss, loss_dict = criterion(outputs=outputs, ema_outputs=ema_outputs,
+                                        targets=batch_data_label)
 
             loss_reduced = all_reduce_average(loss)
             loss_dict_reduced = reduce_dict(loss_dict)

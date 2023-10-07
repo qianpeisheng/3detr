@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 
 # 3DETR codebase specific imports
 from datasets import build_dataset_Pseudo_EMA
-from engine import evaluate, train_one_epoch, evaluate_incremental
+from engine_ema import evaluate, train_one_epoch, evaluate_incremental
 from models import build_model
 from optimizer import build_optimizer
 from criterion_ema import build_criterion
@@ -133,7 +133,16 @@ def make_args_parser():
     # SDCoT specific args
     parser.add_argument("--num_base_class", default=9, type=int)
     parser.add_argument("--num_novel_class", default=0, type=int)
+    # parser.add_argument('--consistency_weight', type=float, default=10.0,
+    #                     help='use consistency loss with given weight')
+    parser.add_argument('--loss_center_consistency_weight', type=float, default=0.1,
+                        help='use consistency loss with given weight')
+    parser.add_argument('--loss_cls_consistency_weight', type=float, default=10.0,
+                        help='use consistency loss with given weight')
+    parser.add_argument('--loss_size_consistency_weight', type=float, default=1.0,
+                        help='use consistency loss with given weight')
 
+    parser.add_argument('--consistency_ramp_len', type=int, default=30, help='length of the consistency loss ramp-up')
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
     parser.add_argument("--max_epoch", default=720, type=int)
@@ -252,14 +261,23 @@ def do_train(
             # evaluate the model at epoch 1 for sanity check
 
             ap_calculator = evaluate_incremental(
-                args,
-                epoch,
-                model,
-                criterion_val,
-                dataset_config_val,
-                dataloaders["test"],
-                logger,
-                curr_iter,
+                args = args,
+                curr_epoch = epoch,
+                model = model,
+                ema_model = ema_model,
+                criterion = None, # do not compute loss for speed-up; Comment out to see test loss
+                dataset_config = dataset_config_val,
+                dataset_loader = dataloaders["test"],
+                logger = logger,
+                curr_train_iter = curr_iter,
+                # epoch,
+                # model,
+                # ema_model,
+                # criterion_val,
+                # dataset_config_val,
+                # dataloaders["test"],
+                # logger,
+                # curr_iter,
             )
             metrics = ap_calculator.compute_metrics()
             ap25 = metrics[0.25]["mAP"]
@@ -390,7 +408,6 @@ def main(local_rank, args):
 
     datasets, dataset_config_train, dataset_config_val, dataset_config_base = build_dataset_Pseudo_EMA(
         args)
-
     # define the base detection model and load weights
     base_detection_model, _ = build_model(args, dataset_config_base)
     base_detection_model = base_detection_model.cuda(local_rank)  # TODO add ddp

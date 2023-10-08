@@ -133,7 +133,8 @@ class Matcher(nn.Module):
         for b in range(batchsize):
             assign = []
             if nactual_gt[b] > 0:
-                assign = linear_sum_assignment(final_cost[b, :, : nactual_gt[b]])
+                assign = linear_sum_assignment(
+                    final_cost[b, :, : nactual_gt[b]])
                 assign = [
                     torch.from_numpy(x).long().to(device=pred_cls_prob.device)
                     for x in assign
@@ -178,7 +179,6 @@ class SetCriterion(nn.Module):
     def set_consistency_weight_scale(self, consistency_weight_scale):
         self.consistency_weight_scale = consistency_weight_scale
 
-
     @torch.no_grad()
     def loss_cardinality(self, outputs, targets, assignments):
         # Count the number of predictions that are objects
@@ -186,7 +186,8 @@ class SetCriterion(nn.Module):
 
         pred_logits = outputs["sem_cls_logits"]
         # Count the number of predictions that are NOT "no-object" (which is the last class)
-        pred_objects = (pred_logits.argmax(-1) != pred_logits.shape[-1] - 1).sum(1)
+        pred_objects = (pred_logits.argmax(-1) !=
+                        pred_logits.shape[-1] - 1).sum(1)
         card_err = F.l1_loss(pred_objects.float(), targets["nactual_gt"])
         return {"loss_cardinality": card_err}
 
@@ -212,7 +213,7 @@ class SetCriterion(nn.Module):
                 sorted_indices = torch.argsort(t1[1])
             except IndexError:
                 # empty tensor. skip
-                print('empty prediction from the student model')
+                # print('empty prediction from the student model')
                 continue
             sorted_t1_0 = torch.index_select(t1[0], dim=0, index=sorted_indices)
             sorted_t1_1 = torch.index_select(t1[1], dim=0, index=sorted_indices)
@@ -224,7 +225,7 @@ class SetCriterion(nn.Module):
                 sorted_indices = torch.argsort(t1[1])
             except IndexError:
                 # empty tensor. skip
-                print('empty prediction from the dynamic teacher model')
+                # print('empty prediction from the dynamic teacher model')
                 continue
             sorted_t1_0 = torch.index_select(t1[0], dim=0, index=sorted_indices)
             sorted_t1_1 = torch.index_select(t1[1], dim=0, index=sorted_indices)
@@ -238,25 +239,28 @@ class SetCriterion(nn.Module):
 
         center_dist_2 = torch.cdist(
             center, ema_center, p=2
-        ) # the reverse has the same mean value
+        )  # the reverse has the same mean value
 
         # center cost: batch x nqueries x ngt
         # This is to debug modified gradients
-        center_dist_2_clone = center_dist_2 #.clone()
+        center_dist_2_clone = center_dist_2  # .clone()
 
         # giou cost: batch x nqueries x ngt
         # giou_mat = -outputs["gious"].detach()
 
         # Extract indices from assignments and ema_assignments
         # handle empty tensors, which will not be saved in indices
-        indices = [(i, inner[0], ema_inner[0]) for i, (inner, ema_inner) in enumerate(zip(assignments['assignments'], ema_assignments['assignments'])) if inner and ema_inner]
+        indices = [(i, inner[0], ema_inner[0]) for i, (inner, ema_inner) in enumerate(zip(
+            assignments['assignments'], ema_assignments['assignments'])) if inner and ema_inner]
         # indices = [(i, assignments['assignments'][i][0], ema_assignments['assignments'][i][0]) for i in range(len(assignments['assignments'])) if len(assignments['assignments'][i][0]) > 0]
         # indices = [(i, assignments['assignments'][i][0], ema_assignments['assignments'][i][0]) for i in range(len(assignments['assignments']))]
         # return {"loss_center_consistency": sum(center_dist_2_clone) / len(center_dist_2_clone)}, indices#assignments, ema_assignments # magnitude 8
 
         # Select elements from center_dist_2 based on the extracted indices
-        selected_elements = [center_dist_2_clone[i, assignments_index, ema_assignments_index] for i, assignments_index, ema_assignments_index in indices]
-        center_consistency_loss = [selected_element.sum() for selected_element in selected_elements]
+        selected_elements = [center_dist_2_clone[i, assignments_index, ema_assignments_index]
+                             for i, assignments_index, ema_assignments_index in indices]
+        center_consistency_loss = [selected_element.sum()
+                                   for selected_element in selected_elements]
         # center shape: (batch_size, nprop, 3), so is ema_center
         # for each prediction in the batch, use the assignments to select the centers
         # of the matched proposals. Repeat for ema_center.
@@ -276,37 +280,56 @@ class SetCriterion(nn.Module):
         # referring to SESS, we only consider the matched proposals which are
         # closest pairs of the two sets of proposals.
 
-        return {"loss_center_consistency": sum(center_consistency_loss) / len(center_consistency_loss)}, indices#assignments, ema_assignments # magnitude 8
+        # assignments, ema_assignments # magnitude 8
+        return {"loss_center_consistency": sum(center_consistency_loss) / len(center_consistency_loss)}, indices
 
     def loss_class_consistency(self, outputs, ema_outputs, indices):
-
+        # need to use logits to compute prob and kl_div loss, because prob does not have
+        # the no-object class, and the sum of prob is not 1, which is required by kl_div loss.
         sem_cls_logits = outputs["sem_cls_logits"]
-        sem_cls_prob_log = F.log_softmax(sem_cls_logits, dim=-1) # for kl_div loss
-        ema_sem_cls_prob = ema_outputs["sem_cls_prob"]
-        sem_cls_aligned = [sem_cls_prob_log[i, assignments_index, :-1] for i, assignments_index, _ in indices] # -1 is the no-object class
-        ema_sem_cls_aligned = [ema_sem_cls_prob[i, ema_assignments_index] for i, _, ema_assignments_index in indices]
-        cls_consistency_loss = [F.kl_div(sem_cls_aligned[i], ema_sem_cls_aligned[i], reduction='mean') for i in range(len(indices))]
+        # sem_cls_prob = outputs["sem_cls_prob"]
+        sem_cls_prob_log = F.log_softmax(
+            sem_cls_logits, dim=-1)  # for kl_div loss
+        # sem_cls_prob_log = sem_cls_prob.log()
+        # ema_sem_cls_prob = ema_outputs["sem_cls_prob"]
+        ema_cls_logits = ema_outputs["sem_cls_logits"]
+        ema_sem_cls_prob = F.softmax(ema_cls_logits, dim=-1)
+
+        # sem_cls_aligned = [sem_cls_prob_log[i, assignments_index, :-1]
+        sem_cls_aligned = [sem_cls_prob_log[i, assignments_index, :]  # prob already excludes the no-object class
+                           for i, assignments_index, _ in indices]  # -1 is the no-object class
+        ema_sem_cls_aligned = [ema_sem_cls_prob[i, ema_assignments_index]
+                               for i, _, ema_assignments_index in indices]
+        cls_consistency_loss = [F.kl_div(
+            sem_cls_aligned[i], ema_sem_cls_aligned[i], reduction='mean') for i in range(len(indices))]
         # use len(indices) instead of sem_cls_prob_log.shape[0] to avoid empty tensors
-        return {"loss_cls_consistency": sum(cls_consistency_loss)/len(cls_consistency_loss)} # magnitude 0.0073
+        # magnitude 0.0073
+        return {"loss_cls_consistency": sum(cls_consistency_loss)/len(cls_consistency_loss)}
 
     def loss_size_consistency(self, outputs, ema_outputs, indices):
         output_sizes = outputs["size_normalized"]
         ema_output_sizes = ema_outputs["size_normalized"]
-        size_aligned = [output_sizes[i, assignments_index] for i, assignments_index, _ in indices]
-        ema_size_aligned = [ema_output_sizes[i, ema_assignments_index] for i, _, ema_assignments_index in indices]
-        size_consistency_loss = [F.mse_loss(size_aligned[i], ema_size_aligned[i]) for i in range(len(indices))]
+        size_aligned = [output_sizes[i, assignments_index]
+                        for i, assignments_index, _ in indices]
+        ema_size_aligned = [ema_output_sizes[i, ema_assignments_index]
+                            for i, _, ema_assignments_index in indices]
+        size_consistency_loss = [F.mse_loss(
+            size_aligned[i], ema_size_aligned[i]) for i in range(len(indices))]
 
-        return {"loss_size_consistency": sum(size_consistency_loss) / len(size_consistency_loss)} # magnitude 0.0121
-
+        # magnitude 0.0121
+        return {"loss_size_consistency": sum(size_consistency_loss) / len(size_consistency_loss)}
 
     def loss_consistency(self, outputs, ema_outputs, assignments, ema_assignments):
         # assignments is not used. It is only passed to keep the same function signature as other losses
-        loss_center_consistency, indices  = self.loss_center_consistency(outputs, ema_outputs, assignments, ema_assignments)
-        loss_class_consistency = self.loss_class_consistency(outputs, ema_outputs, indices)
-        loss_size_consistency = self.loss_size_consistency(outputs, ema_outputs, indices)
-        loss_consistency = loss_center_consistency + loss_class_consistency + loss_size_consistency
+        loss_center_consistency, indices = self.loss_center_consistency(
+            outputs, ema_outputs, assignments, ema_assignments)
+        loss_class_consistency = self.loss_class_consistency(
+            outputs, ema_outputs, indices)
+        loss_size_consistency = self.loss_size_consistency(
+            outputs, ema_outputs, indices)
+        loss_consistency = loss_center_consistency + \
+            loss_class_consistency + loss_size_consistency
         return {"loss_consistency": loss_consistency}
-
 
     def loss_sem_cls(self, outputs, targets, assignments):
 
@@ -409,8 +432,10 @@ class SetCriterion(nn.Module):
             angle_cls_loss /= targets["num_boxes"]
             angle_reg_loss /= targets["num_boxes"]
         else:
-            angle_cls_loss = torch.zeros(1, device=angle_logits.device).squeeze()
-            angle_reg_loss = torch.zeros(1, device=angle_logits.device).squeeze()
+            angle_cls_loss = torch.zeros(
+                1, device=angle_logits.device).squeeze()
+            angle_reg_loss = torch.zeros(
+                1, device=angle_logits.device).squeeze()
         return {"loss_angle_cls": angle_cls_loss, "loss_angle_reg": angle_reg_loss}
 
     def loss_center(self, outputs, targets, assignments):
@@ -485,7 +510,8 @@ class SetCriterion(nn.Module):
             gt_box_sizes = torch.stack(
                 [
                     torch.gather(
-                        gt_box_sizes[:, :, x], 1, assignments["per_prop_gt_inds"]
+                        gt_box_sizes[:, :,
+                                     x], 1, assignments["per_prop_gt_inds"]
                     )
                     for x in range(gt_box_sizes.shape[-1])
                 ],
@@ -528,9 +554,12 @@ class SetCriterion(nn.Module):
         inds_to_flip_y_axis = torch.nonzero(flip_y_axis).squeeze(1)
 
         # ema_outputs shape is (batch, nprop, 3)
-        ema_outputs["center_normalized"][inds_to_flip_x_axis,:, 0] = -ema_outputs["center_normalized"][inds_to_flip_x_axis,:, 0]
-        ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1] = -ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1]
-        ema_outputs["center_normalized"] = torch.bmm(ema_outputs["center_normalized"], rot_mat.transpose(1,2))
+        ema_outputs["center_normalized"][inds_to_flip_x_axis, :, 0] = - \
+            ema_outputs["center_normalized"][inds_to_flip_x_axis, :, 0]
+        ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1] = - \
+            ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1]
+        ema_outputs["center_normalized"] = torch.bmm(
+            ema_outputs["center_normalized"], rot_mat.transpose(1, 2))
 
         # calculate ema gious
         ema_gious = generalized_box3d_iou(
@@ -560,13 +589,16 @@ class SetCriterion(nn.Module):
                 and self.loss_weight_dict[loss_wt_key] > 0
             ) or loss_wt_key not in self.loss_weight_dict:
                 if 'center_consistency' in k:
-                    curr_loss, indices = self.loss_functions[k](outputs, ema_outputs, assignments, ema_assignments)
+                    curr_loss, indices = self.loss_functions[k](
+                        outputs, ema_outputs, assignments, ema_assignments)
                 elif 'cls_consistency' in k or 'size_consistency' in k:
-                    curr_loss = self.loss_functions[k](outputs, ema_outputs, indices)
+                    curr_loss = self.loss_functions[k](
+                        outputs, ema_outputs, indices)
                 else:
                     # only compute losses with loss_wt > 0
                     # certain losses like cardinality are only logged and have no loss weight
-                    curr_loss = self.loss_functions[k](outputs, targets, assignments)
+                    curr_loss = self.loss_functions[k](
+                        outputs, targets, assignments)
                 losses.update(curr_loss)
 
         final_loss = 0
@@ -575,13 +607,15 @@ class SetCriterion(nn.Module):
                 losses[k.replace("_weight", "")] *= self.loss_weight_dict[k]
                 # further adjust the consistency loss by a scale factor
                 if 'consistency' in k:
-                    losses[k.replace("_weight", "")] *= self.consistency_weight_scale
+                    losses[k.replace("_weight", "")
+                           ] *= self.consistency_weight_scale
                 final_loss += losses[k.replace("_weight", "")]
         return final_loss, losses
 
     def forward(self, outputs, ema_outputs, targets):
         nactual_gt = targets["gt_box_present"].sum(axis=1).long()
-        num_boxes = torch.clamp(all_reduce_average(nactual_gt.sum()), min=1).item()
+        num_boxes = torch.clamp(all_reduce_average(
+            nactual_gt.sum()), min=1).item()
         targets["nactual_gt"] = nactual_gt
         targets["num_boxes"] = num_boxes
         targets[
@@ -589,7 +623,7 @@ class SetCriterion(nn.Module):
         ] = nactual_gt.sum().item()  # number of boxes on this worker for dist training
 
         loss, loss_dict = self.single_output_forward(outputs=outputs["outputs"],
-                            ema_outputs=ema_outputs['outputs'], targets=targets)
+                                                     ema_outputs=ema_outputs['outputs'], targets=targets)
 
         if "aux_outputs" in outputs:
             for k in range(len(outputs["aux_outputs"])):

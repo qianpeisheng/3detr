@@ -18,5 +18,5 @@ CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT_pseudo_distill.py \
 --eval_every_epoch 50 \
 --dataset_num_workers 7 \
 --batchsize_per_gpu 14 \
---checkpoint_dir ckpts_scannet/scannet_SDCoT_14_4_pseudo_distill \
+--checkpoint_dir ckpts_scannet/scannet_SDCoT_14_4_pseudo_distill_vallina \
 --checkpoint_name checkpoint_best_5634.pth

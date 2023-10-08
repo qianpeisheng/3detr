@@ -141,9 +141,11 @@ def make_args_parser():
                         help='use consistency loss with given weight')
     parser.add_argument('--loss_size_consistency_weight', type=float, default=2.0,
                         help='use consistency loss with given weight')
-    parser.add_argument('--ema_decay', type=float, default=0.999, help='ema variable decay rate')
+    parser.add_argument('--ema_decay', type=float,
+                        default=0.999, help='ema variable decay rate')
 
-    parser.add_argument('--consistency_ramp_len', type=int, default=30, help='length of the consistency loss ramp-up')
+    parser.add_argument('--consistency_ramp_len', type=int,
+                        default=30, help='length of the consistency loss ramp-up')
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
     parser.add_argument("--max_epoch", default=720, type=int)
@@ -266,23 +268,23 @@ def do_train(
                 epoch,
                 args,
                 best_val_metrics,
-                filename= f"EMA_checkpoint_{epoch:04d}.pth",
+                filename=f"EMA_checkpoint_{epoch:04d}.pth",
             )
 
         if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1) or epoch == 1:
             # evaluate the model at epoch 1 for sanity check
 
             ap_calculator = evaluate_incremental(
-                args = args,
-                curr_epoch = epoch,
-                model = model,
+                args=args,
+                curr_epoch=epoch,
+                model=model,
                 # ema_model = ema_model,
-                criterion = None, # do not compute loss for speed-up; Comment out to see test loss
-                dataset_config = dataset_config_val,
-                dataset_loader = dataloaders["test"],
-                logger = logger,
-                curr_train_iter = curr_iter,
-                test_prefix="Test",
+                criterion=None,  # do not compute loss for speed-up; Comment out to see test loss
+                dataset_config=dataset_config_val,
+                dataset_loader=dataloaders["test"],
+                logger=logger,
+                curr_train_iter=curr_iter,
+                test_prefix="Student ",
             )
             metrics = ap_calculator.compute_metrics()
             ap25 = metrics[0.25]["mAP"]
@@ -316,26 +318,28 @@ def do_train(
 
             # repeat the evaluation with the ema model
             ap_calculator_ema = evaluate_incremental(
-                args = args,
-                curr_epoch = epoch,
-                model = ema_model,
-                criterion = None, # do not compute loss for speed-up; Comment out to see test loss
-                dataset_config = dataset_config_val,
-                dataset_loader = dataloaders["test"],
-                logger = logger,
-                curr_train_iter = curr_iter,
-                test_prefix="Test EMA",
+                args=args,
+                curr_epoch=epoch,
+                model=ema_model,
+                criterion=None,  # do not compute loss for speed-up; Comment out to see test loss
+                dataset_config=dataset_config_val,
+                dataset_loader=dataloaders["test"],
+                logger=logger,
+                curr_train_iter=curr_iter,
+                test_prefix="EMA",
             )
             metrics_ema = ap_calculator_ema.compute_metrics()
             ap25_ema = metrics_ema[0.25]["mAP"]
-            metric_str_ema = ap_calculator_ema.metrics_to_str(metrics_ema, per_class=True)
+            metric_str_ema = ap_calculator_ema.metrics_to_str(
+                metrics_ema, per_class=True)
             metrics_dict_ema = ap_calculator_ema.metrics_to_dict(metrics_ema)
             if is_primary():
                 print("==" * 10)
                 print(
                     f"EMA Evaluate Epoch [{epoch}/{args.max_epoch}]; Metrics {metric_str_ema}")
                 print("==" * 10)
-                logger.log_scalars(metrics_dict_ema, curr_iter, prefix="Test EMA/")
+                logger.log_scalars(
+                    metrics_dict_ema, curr_iter, prefix="Test EMA/")
             if is_primary() and (
                 len(
                     best_val_metrics) == 0 or best_val_metrics[0.25]["mAP"] < ap25_ema
@@ -363,7 +367,7 @@ def do_train(
         epoch,
         model,
         # criterion_val,
-        None, # do not compute loss for speed-up; Comment out to see val loss
+        None,  # do not compute loss for speed-up; Comment out to see val loss
         dataset_config_val,
         dataloaders["test"],
         logger,
@@ -502,13 +506,13 @@ def main(local_rank, args):
 
         # swap the last and the old_cls_size-1 th class weights because the last class is the background class
         model.state_dict()['mlp_heads.sem_cls_head.layers.8.weight'][-1,
-                                                                        ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.weight'][-1, ...]
+                                                                     ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.weight'][-1, ...]
         model.state_dict()['mlp_heads.sem_cls_head.layers.8.bias'][-1,
-                                                                    ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.bias'][-1, ...]
+                                                                   ...] = _stat_dict['mlp_heads.sem_cls_head.layers.8.bias'][-1, ...]
         model.state_dict()['mlp_heads.sem_cls_head.layers.8.weight'][old_cls_size - 1,
-                                                                        ...] *= 0.
+                                                                     ...] *= 0.
         model.state_dict()['mlp_heads.sem_cls_head.layers.8.bias'][old_cls_size - 1,
-                                                                    ...] *= 0.
+                                                                   ...] *= 0.
 
         # remove mlp_heads.sem_cls_head.layers.8.weight and bias from the state dict
         _stat_dict.pop('mlp_heads.sem_cls_head.layers.8.weight')
@@ -533,6 +537,9 @@ def main(local_rank, args):
     ema_model.cuda(local_rank)
     for param in ema_model.parameters():
         param.detach_()
+
+    # the code above makes the ema model have the same weights as the model
+    # and the ema model is not updated during training.
 
     criterion_train = build_criterion(args, dataset_config_train)
     criterion_train = criterion_train.cuda(local_rank)

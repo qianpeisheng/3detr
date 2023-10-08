@@ -18,15 +18,18 @@ from utils.dist import (
     barrier,
 )
 
+
 def get_current_weight(epoch, weight, ramp_len):
     # ramp-up from https://arxiv.org/abs/1610.02242
     return weight * ramps.sigmoid_rampup(epoch, ramp_len)
+
 
 def update_ema_variables(model, ema_model, alpha, global_step):
     # Use the true average until the exponential average is more correct
     alpha = min(1 - 1 / (global_step + 1), alpha)
     for ema_param, param in zip(ema_model.parameters(), model.parameters()):
         ema_param.data.mul_(alpha).add_(1 - alpha, param.data)
+
 
 def compute_learning_rate(args, curr_epoch_normalized):
     assert curr_epoch_normalized <= 1.0 and curr_epoch_normalized >= 0.0
@@ -80,15 +83,19 @@ def train_one_epoch(
     loss_avg = SmoothedValue(window_size=10)
 
     model.train()
+    ema_model.train()  # set to train mode for batch norm and dropout to work
     barrier()
 
     # ramp up weight for consistency loss
-    curr_consistent_weight_scale = get_current_weight(curr_epoch, 1. , args.consistency_ramp_len)
+    curr_consistent_weight_scale = get_current_weight(
+        curr_epoch, 1., args.consistency_ramp_len)
     criterion.set_consistency_weight_scale(curr_consistent_weight_scale)
     # log the current weight scale
     if is_primary():
-        logger.log_scalars({'consistent_weight scale': curr_consistent_weight_scale}, curr_iter, prefix="Train_details/")
-        print(f"Current consistent weight scale: {curr_consistent_weight_scale:.6f}")
+        logger.log_scalars(
+            {'consistent_weight scale': curr_consistent_weight_scale}, curr_iter, prefix="Train_details/")
+        print(
+            f"Current consistent weight scale: {curr_consistent_weight_scale:.6f}")
 
     for batch_idx, batch_data_label in enumerate(dataset_loader):
         curr_time = time.time()
@@ -131,7 +138,8 @@ def train_one_epoch(
 
         loss.backward()
         if args.clip_gradient > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_gradient)
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), args.clip_gradient)
         optimizer.step()
 
         if curr_iter % args.log_metrics_every == 0:
@@ -154,7 +162,8 @@ def train_one_epoch(
             print(
                 f"Epoch [{curr_epoch}/{args.max_epoch}]; Iter [{curr_iter}/{max_iters}]; Loss {loss_avg.avg:0.2f}; Center_con {loss_dict_reduced['loss_center_consistency']:.3f}; Cls_con {loss_dict_reduced['loss_cls_consistency']:.3f}; Size_con {loss_dict_reduced['loss_size_consistency']:.3f}; LR {curr_lr:0.2e}; Iter time {time_delta.avg:0.2f}; ETA {eta_str}; Mem {mem_mb:0.2f}MB"
             )
-            logger.log_scalars(loss_dict_reduced, curr_iter, prefix="Train_details/")
+            logger.log_scalars(loss_dict_reduced, curr_iter,
+                               prefix="Train_details/")
 
             train_dict = {}
             train_dict["lr"] = curr_lr
@@ -170,6 +179,7 @@ def train_one_epoch(
         barrier()
 
     return ap_calculator
+
 
 @torch.no_grad()
 def evaluate(
@@ -316,7 +326,7 @@ def evaluate_incremental(
         if is_primary() and curr_iter % args.log_every == 0:
             mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
             print(
-                f"Evaluate {epoch_str}; Batch [{curr_iter}/{num_batches}]; {loss_str} Iter time {time_delta.avg:0.2f}; Mem {mem_mb:0.2f}MB"
+                f"{test_prefix} Evaluate {epoch_str}; Batch [{curr_iter}/{num_batches}]; {loss_str} Iter time {time_delta.avg:0.2f}; Mem {mem_mb:0.2f}MB"
             )
 
             test_dict = {}

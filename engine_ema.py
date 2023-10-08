@@ -5,6 +5,7 @@ import logging
 import math
 import time
 import sys
+from utils import ramps
 
 from torch.distributed.distributed_c10d import reduce
 from utils.ap_calculator import APCalculator
@@ -17,6 +18,15 @@ from utils.dist import (
     barrier,
 )
 
+def get_current_weight(epoch, weight, ramp_len):
+    # ramp-up from https://arxiv.org/abs/1610.02242
+    return weight * ramps.sigmoid_rampup(epoch, ramp_len)
+
+def update_ema_variables(model, ema_model, alpha, global_step):
+    # Use the true average until the exponential average is more correct
+    alpha = min(1 - 1 / (global_step + 1), alpha)
+    for ema_param, param in zip(ema_model.parameters(), model.parameters()):
+        ema_param.data.mul_(alpha).add_(1 - alpha, param.data)
 
 def compute_learning_rate(args, curr_epoch_normalized):
     assert curr_epoch_normalized <= 1.0 and curr_epoch_normalized >= 0.0
@@ -72,6 +82,14 @@ def train_one_epoch(
     model.train()
     barrier()
 
+    # ramp up weight for consistency loss
+    curr_consistent_weight_scale = get_current_weight(curr_epoch, 1. , args.consistency_ramp_len)
+    criterion.set_consistency_weight_scale(curr_consistent_weight_scale)
+    # log the current weight scale
+    if is_primary():
+        logger.log_scalars({'consistent_weight scale': curr_consistent_weight_scale}, curr_iter, prefix="Train_details/")
+        print(f"Current consistent weight scale: {curr_consistent_weight_scale:.6f}")
+
     for batch_idx, batch_data_label in enumerate(dataset_loader):
         curr_time = time.time()
         curr_lr = adjust_learning_rate(args, optimizer, curr_iter / max_iters)
@@ -89,9 +107,6 @@ def train_one_epoch(
         outputs = model(inputs)
         # Add augmentation related information to outputs to facilitate consistency loss computation.
         outputs['outputs']['flip_x_axis'] = batch_data_label['flip_x_axis']
-
-        # check if flip_x_axis is correct
-        print(outputs['outputs']['flip_x_axis'])
         outputs['outputs']['flip_y_axis'] = batch_data_label['flip_y_axis']
         outputs['outputs']['rot_mat'] = batch_data_label['rot_mat']
 
@@ -106,6 +121,7 @@ def train_one_epoch(
         # Compute loss
         loss, loss_dict = criterion(outputs=outputs, ema_outputs=ema_outputs,
                                     targets=batch_data_label)
+
         loss_reduced = all_reduce_average(loss)
         loss_dict_reduced = reduce_dict(loss_dict)
 
@@ -136,7 +152,7 @@ def train_one_epoch(
             eta_seconds = (max_iters - curr_iter) * time_delta.avg
             eta_str = str(datetime.timedelta(seconds=int(eta_seconds)))
             print(
-                f"Epoch [{curr_epoch}/{args.max_epoch}]; Iter [{curr_iter}/{max_iters}]; Loss {loss_avg.avg:0.2f}; Center_con {loss_dict_reduced['loss_center_consistency_weight']:.3f}; Cls_con {loss_dict_reduced['loss_cls_consistency_weight']:.3f}; Size_con {loss_dict_reduced['loss_size_consistency_weight']:.3f}; LR {curr_lr:0.2e}; Iter time {time_delta.avg:0.2f}; ETA {eta_str}; Mem {mem_mb:0.2f}MB"
+                f"Epoch [{curr_epoch}/{args.max_epoch}]; Iter [{curr_iter}/{max_iters}]; Loss {loss_avg.avg:0.2f}; Center_con {loss_dict_reduced['loss_center_consistency']:.3f}; Cls_con {loss_dict_reduced['loss_cls_consistency']:.3f}; Size_con {loss_dict_reduced['loss_size_consistency']:.3f}; LR {curr_lr:0.2e}; Iter time {time_delta.avg:0.2f}; ETA {eta_str}; Mem {mem_mb:0.2f}MB"
             )
             logger.log_scalars(loss_dict_reduced, curr_iter, prefix="Train_details/")
 
@@ -148,10 +164,12 @@ def train_one_epoch(
             logger.log_scalars(train_dict, curr_iter, prefix="Train/")
 
         curr_iter += 1
+
+        # Update EMA model
+        update_ema_variables(model, ema_model, args.ema_decay, curr_iter)
         barrier()
 
     return ap_calculator
-
 
 @torch.no_grad()
 def evaluate(
@@ -238,12 +256,13 @@ def evaluate_incremental(
     args,
     curr_epoch,
     model,
-    ema_model,
+    # ema_model, # run evaluate_incremental again by substituting model with ema_model
     criterion,
     dataset_config,
     dataset_loader,
     logger,
     curr_train_iter,
+    test_prefix="Test",
 ):
 
     # ap calculator is exact for evaluation. This is slower than the ap calculator used during training.
@@ -264,11 +283,6 @@ def evaluate_incremental(
     barrier()
     epoch_str = f"[{curr_epoch}/{args.max_epoch}]" if curr_epoch > 0 else ""
 
-    # EMA forward pass
-    ema_model.eval()
-    barrier()
-
-
     for batch_idx, batch_data_label in enumerate(dataset_loader):
         curr_time = time.time()
         for key in batch_data_label:
@@ -280,31 +294,19 @@ def evaluate_incremental(
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
         outputs = model(inputs)
-        # Add augmentation related information to outputs to facilitate consistency loss computation.
-        outputs['outputs']['flip_x_axis'] = batch_data_label['flip_x_axis']
-        outputs['outputs']['flip_y_axis'] = batch_data_label['flip_y_axis']
-        outputs['outputs']['rot_mat'] = batch_data_label['rot_mat']
 
-        # EMA forward pass
-        ema_inputs = {
-            "point_clouds": batch_data_label["ema_point_clouds"],
-            "point_cloud_dims_min": batch_data_label["ema_point_cloud_dims_min"],
-            "point_cloud_dims_max": batch_data_label["ema_point_cloud_dims_max"],
-        }
-        ema_outputs = ema_model(ema_inputs)
-
-        # Compute loss
+        # Compute loss, skipped for faster evaluation
         loss_str = ""
-        if criterion is not None:
-            # loss, loss_dict = criterion(outputs, batch_data_label)
-            # Compute loss
-            loss, loss_dict = criterion(outputs=outputs, ema_outputs=ema_outputs,
-                                        targets=batch_data_label)
+        # if criterion is not None:
+        #     # loss, loss_dict = criterion(outputs, batch_data_label)
+        #     # Compute loss
+        #     loss, loss_dict = criterion(outputs=outputs, ema_outputs=ema_outputs,
+        #                                 targets=batch_data_label)
 
-            loss_reduced = all_reduce_average(loss)
-            loss_dict_reduced = reduce_dict(loss_dict)
-            loss_avg.update(loss_reduced.item())
-            loss_str = f"Loss {loss_avg.avg:0.2f};"
+        #     loss_reduced = all_reduce_average(loss)
+        #     loss_dict_reduced = reduce_dict(loss_dict)
+        #     loss_avg.update(loss_reduced.item())
+        #     loss_str = f"Loss {loss_avg.avg:0.2f};"
 
         # Memory intensive as it gathers point cloud GT tensor across all ranks
         outputs["outputs"] = all_gather_dict(outputs["outputs"])
@@ -325,10 +327,10 @@ def evaluate_incremental(
         curr_iter += 1
         barrier()
     if is_primary():
-        if criterion is not None:
-            logger.log_scalars(
-                loss_dict_reduced, curr_train_iter, prefix="Test_details/"
-            )
-        logger.log_scalars(test_dict, curr_train_iter, prefix="Test/")
+        # if criterion is not None:
+        #     logger.log_scalars(
+        #         loss_dict_reduced, curr_train_iter, prefix="Test_details/"
+        #     )
+        logger.log_scalars(test_dict, curr_train_iter, prefix="{test_prefix}/")
 
     return ap_calculator

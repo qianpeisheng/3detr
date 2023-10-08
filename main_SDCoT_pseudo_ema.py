@@ -135,12 +135,13 @@ def make_args_parser():
     parser.add_argument("--num_novel_class", default=0, type=int)
     # parser.add_argument('--consistency_weight', type=float, default=10.0,
     #                     help='use consistency loss with given weight')
-    parser.add_argument('--loss_center_consistency_weight', type=float, default=0.1,
+    parser.add_argument('--loss_center_consistency_weight', type=float, default=0.2,
                         help='use consistency loss with given weight')
-    parser.add_argument('--loss_cls_consistency_weight', type=float, default=10.0,
+    parser.add_argument('--loss_cls_consistency_weight', type=float, default=20.0,
                         help='use consistency loss with given weight')
-    parser.add_argument('--loss_size_consistency_weight', type=float, default=1.0,
+    parser.add_argument('--loss_size_consistency_weight', type=float, default=2.0,
                         help='use consistency loss with given weight')
+    parser.add_argument('--ema_decay', type=float, default=0.999, help='ema variable decay rate')
 
     parser.add_argument('--consistency_ramp_len', type=int, default=30, help='length of the consistency loss ramp-up')
     ##### Training #####
@@ -257,6 +258,17 @@ def do_train(
                 best_val_metrics,
             )
 
+            # save the ema model
+            save_checkpoint(
+                args.checkpoint_dir,
+                ema_model,
+                optimizer,
+                epoch,
+                args,
+                best_val_metrics,
+                filename= f"EMA_checkpoint_{epoch:04d}.pth",
+            )
+
         if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1) or epoch == 1:
             # evaluate the model at epoch 1 for sanity check
 
@@ -264,20 +276,13 @@ def do_train(
                 args = args,
                 curr_epoch = epoch,
                 model = model,
-                ema_model = ema_model,
+                # ema_model = ema_model,
                 criterion = None, # do not compute loss for speed-up; Comment out to see test loss
                 dataset_config = dataset_config_val,
                 dataset_loader = dataloaders["test"],
                 logger = logger,
                 curr_train_iter = curr_iter,
-                # epoch,
-                # model,
-                # ema_model,
-                # criterion_val,
-                # dataset_config_val,
-                # dataloaders["test"],
-                # logger,
-                # curr_iter,
+                test_prefix="Test",
             )
             metrics = ap_calculator.compute_metrics()
             ap25 = metrics[0.25]["mAP"]
@@ -309,6 +314,47 @@ def do_train(
                     f"Epoch [{epoch}/{args.max_epoch}] saved current best val checkpoint at {filename}; ap25 {ap25}"
                 )
 
+            # repeat the evaluation with the ema model
+            ap_calculator_ema = evaluate_incremental(
+                args = args,
+                curr_epoch = epoch,
+                model = ema_model,
+                criterion = None, # do not compute loss for speed-up; Comment out to see test loss
+                dataset_config = dataset_config_val,
+                dataset_loader = dataloaders["test"],
+                logger = logger,
+                curr_train_iter = curr_iter,
+                test_prefix="Test EMA",
+            )
+            metrics_ema = ap_calculator_ema.compute_metrics()
+            ap25_ema = metrics_ema[0.25]["mAP"]
+            metric_str_ema = ap_calculator_ema.metrics_to_str(metrics_ema, per_class=True)
+            metrics_dict_ema = ap_calculator_ema.metrics_to_dict(metrics_ema)
+            if is_primary():
+                print("==" * 10)
+                print(
+                    f"EMA Evaluate Epoch [{epoch}/{args.max_epoch}]; Metrics {metric_str_ema}")
+                print("==" * 10)
+                logger.log_scalars(metrics_dict_ema, curr_iter, prefix="Test EMA/")
+            if is_primary() and (
+                len(
+                    best_val_metrics) == 0 or best_val_metrics[0.25]["mAP"] < ap25_ema
+            ):
+                best_val_metrics = metrics_ema
+                filename = "checkpoint_best.pth"
+                save_checkpoint(
+                    args.checkpoint_dir,
+                    model_no_ddp,
+                    optimizer,
+                    epoch,
+                    args,
+                    best_val_metrics,
+                    filename=filename,
+                )
+                print(
+                    f"EMA Epoch [{epoch}/{args.max_epoch}] saved current best val checkpoint at {filename}; ap25 {ap25_ema}"
+                )
+
     # always evaluate last checkpoint
     epoch = args.max_epoch - 1
     curr_iter = epoch * len(dataloaders["train"])
@@ -316,7 +362,8 @@ def do_train(
         args,
         epoch,
         model,
-        criterion_val,
+        # criterion_val,
+        None, # do not compute loss for speed-up; Comment out to see val loss
         dataset_config_val,
         dataloaders["test"],
         logger,

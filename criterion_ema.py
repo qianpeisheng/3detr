@@ -171,9 +171,13 @@ class SetCriterion(nn.Module):
             # thus, this loss does not have a loss_weight associated with it.
             "loss_cardinality": self.loss_cardinality,
             "loss_center_consistency": self.loss_center_consistency,
-            # 'loss_cls_consistency': self.loss_class_consistency,
-            # 'loss_size_consistency': self.loss_size_consistency,
+            'loss_cls_consistency': self.loss_class_consistency,
+            'loss_size_consistency': self.loss_size_consistency,
         }
+
+    def set_consistency_weight_scale(self, consistency_weight_scale):
+        self.consistency_weight_scale = consistency_weight_scale
+
 
     @torch.no_grad()
     def loss_cardinality(self, outputs, targets, assignments):
@@ -202,36 +206,56 @@ class SetCriterion(nn.Module):
         #     # Reorder t1[0] and t1[1] based on the sorted indices
         #     t1[0] = torch.index_select(t1[0], dim=0, index=sorted_indices)
         #     t1[1] = torch.index_select(t1[1], dim=0, index=sorted_indices)
-
         for i in range(len(assignments['assignments'])):
             t1 = assignments['assignments'][i]
-            sorted_indices = torch.argsort(t1[1])
+            try:
+                sorted_indices = torch.argsort(t1[1])
+            except IndexError:
+                # empty tensor. skip
+                print('empty prediction from the student model')
+                continue
             sorted_t1_0 = torch.index_select(t1[0], dim=0, index=sorted_indices)
             sorted_t1_1 = torch.index_select(t1[1], dim=0, index=sorted_indices)
             assignments['assignments'][i] = [sorted_t1_0, sorted_t1_1]
 
         for i in range(len(ema_assignments['assignments'])):
             t1 = ema_assignments['assignments'][i]
-            sorted_indices = torch.argsort(t1[1])
+            try:
+                sorted_indices = torch.argsort(t1[1])
+            except IndexError:
+                # empty tensor. skip
+                print('empty prediction from the dynamic teacher model')
+                continue
             sorted_t1_0 = torch.index_select(t1[0], dim=0, index=sorted_indices)
             sorted_t1_1 = torch.index_select(t1[1], dim=0, index=sorted_indices)
             ema_assignments['assignments'][i] = [sorted_t1_0, sorted_t1_1]
 
         # assignments['assignments'][0] = assignments['assignments'][0].sort()[0]
-        center = outputs["center_normalized"]
-        ema_center = ema_outputs["center_normalized"]
+        # clone to avoid modifying the original outputs
+        center = outputs["center_normalized"].clone()
+        ema_center = ema_outputs["center_normalized"].clone()
+        # import pdb; pdb.set_trace()
 
         center_dist_2 = torch.cdist(
-            center, ema_center, p=1
+            center, ema_center, p=2
         ) # the reverse has the same mean value
 
-        # Extract indices from assignments and ema_assignments
-        indices = [(i, assignments['assignments'][i][0], ema_assignments['assignments'][i][0]) for i in range(len(assignments['assignments']))]
-        return {"loss_center_consistency": sum(center_dist_2) / len(center_dist_2)}, indices#assignments, ema_assignments # magnitude 8
+        # center cost: batch x nqueries x ngt
+        # This is to debug modified gradients
+        center_dist_2_clone = center_dist_2 #.clone()
 
-        import pdb; pdb.set_trace()
+        # giou cost: batch x nqueries x ngt
+        # giou_mat = -outputs["gious"].detach()
+
+        # Extract indices from assignments and ema_assignments
+        # handle empty tensors, which will not be saved in indices
+        indices = [(i, inner[0], ema_inner[0]) for i, (inner, ema_inner) in enumerate(zip(assignments['assignments'], ema_assignments['assignments'])) if inner and ema_inner]
+        # indices = [(i, assignments['assignments'][i][0], ema_assignments['assignments'][i][0]) for i in range(len(assignments['assignments'])) if len(assignments['assignments'][i][0]) > 0]
+        # indices = [(i, assignments['assignments'][i][0], ema_assignments['assignments'][i][0]) for i in range(len(assignments['assignments']))]
+        # return {"loss_center_consistency": sum(center_dist_2_clone) / len(center_dist_2_clone)}, indices#assignments, ema_assignments # magnitude 8
+
         # Select elements from center_dist_2 based on the extracted indices
-        selected_elements = [center_dist_2[i, assignments_index, ema_assignments_index] for i, assignments_index, ema_assignments_index in indices]
+        selected_elements = [center_dist_2_clone[i, assignments_index, ema_assignments_index] for i, assignments_index, ema_assignments_index in indices]
         center_consistency_loss = [selected_element.sum() for selected_element in selected_elements]
         # center shape: (batch_size, nprop, 3), so is ema_center
         # for each prediction in the batch, use the assignments to select the centers
@@ -249,21 +273,20 @@ class SetCriterion(nn.Module):
         # ema_center[inds_to_flip_y_axis, :, 1] = -ema_center[inds_to_flip_y_axis, :, 1]
         # ema_center = torch.bmm(ema_center, rot_mat.transpose(1,2))
 
-
-
         # referring to SESS, we only consider the matched proposals which are
         # closest pairs of the two sets of proposals.
-
 
         return {"loss_center_consistency": sum(center_consistency_loss) / len(center_consistency_loss)}, indices#assignments, ema_assignments # magnitude 8
 
     def loss_class_consistency(self, outputs, ema_outputs, indices):
+
         sem_cls_logits = outputs["sem_cls_logits"]
         sem_cls_prob_log = F.log_softmax(sem_cls_logits, dim=-1) # for kl_div loss
         ema_sem_cls_prob = ema_outputs["sem_cls_prob"]
         sem_cls_aligned = [sem_cls_prob_log[i, assignments_index, :-1] for i, assignments_index, _ in indices] # -1 is the no-object class
         ema_sem_cls_aligned = [ema_sem_cls_prob[i, ema_assignments_index] for i, _, ema_assignments_index in indices]
-        cls_consistency_loss = [F.kl_div(sem_cls_aligned[i], ema_sem_cls_aligned[i], reduction='mean') for i in range(sem_cls_logits.shape[0])]
+        cls_consistency_loss = [F.kl_div(sem_cls_aligned[i], ema_sem_cls_aligned[i], reduction='mean') for i in range(len(indices))]
+        # use len(indices) instead of sem_cls_prob_log.shape[0] to avoid empty tensors
         return {"loss_cls_consistency": sum(cls_consistency_loss)/len(cls_consistency_loss)} # magnitude 0.0073
 
     def loss_size_consistency(self, outputs, ema_outputs, indices):
@@ -271,7 +294,7 @@ class SetCriterion(nn.Module):
         ema_output_sizes = ema_outputs["size_normalized"]
         size_aligned = [output_sizes[i, assignments_index] for i, assignments_index, _ in indices]
         ema_size_aligned = [ema_output_sizes[i, ema_assignments_index] for i, _, ema_assignments_index in indices]
-        size_consistency_loss = [F.mse_loss(size_aligned[i], ema_size_aligned[i]) for i in range(output_sizes.shape[0])]
+        size_consistency_loss = [F.mse_loss(size_aligned[i], ema_size_aligned[i]) for i in range(len(indices))]
 
         return {"loss_size_consistency": sum(size_consistency_loss) / len(size_consistency_loss)} # magnitude 0.0121
 
@@ -550,6 +573,9 @@ class SetCriterion(nn.Module):
         for k in self.loss_weight_dict:
             if self.loss_weight_dict[k] > 0:
                 losses[k.replace("_weight", "")] *= self.loss_weight_dict[k]
+                # further adjust the consistency loss by a scale factor
+                if 'consistency' in k:
+                    losses[k.replace("_weight", "")] *= self.consistency_weight_scale
                 final_loss += losses[k.replace("_weight", "")]
         return final_loss, losses
 
@@ -601,8 +627,8 @@ def build_criterion(args, dataset_config):
         "loss_size_weight": args.loss_size_weight,
         # consistency
         'loss_center_consistency_weight': args.loss_center_consistency_weight,
-        # 'loss_cls_consistency_weight': args.loss_cls_consistency_weight,
-        # 'loss_size_consistency_weight': args.loss_size_consistency_weight,
+        'loss_cls_consistency_weight': args.loss_cls_consistency_weight,
+        'loss_size_consistency_weight': args.loss_size_consistency_weight,
     }
     criterion = SetCriterion(matcher, dataset_config, loss_weight_dict)
     return criterion

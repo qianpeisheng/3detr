@@ -271,7 +271,7 @@ def do_train(
 
             if is_primary() and (
                 len(
-                    best_val_metrics) == 0 or best_val_metrics[0.25]["mAP"] < ap25 or epoch < 2:
+                    best_val_metrics) == 0 or best_val_metrics[0.25]["mAP"] < ap25 or epoch < 2
             ):
                 print('Best val metrics updated.')
                 # Note that the loaded best_val_metrics is for base classes, which is 

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-from utils.box_util import generalized_box3d_iou
+from utils.box_util import generalized_box3d_iou, flip_axis_to_camera_tensor, get_3d_box_batch_tensor
 from utils.dist import all_reduce_average
 from utils.misc import huber_loss
 from scipy.optimize import linear_sum_assignment
@@ -550,6 +550,7 @@ class SetCriterion(nn.Module):
         flip_x_axis = outputs["flip_x_axis"]
         flip_y_axis = outputs["flip_y_axis"]
         rot_mat = outputs["rot_mat"]
+        rot_mat_transposed = rot_mat.transpose(1, 2)
         inds_to_flip_x_axis = torch.nonzero(flip_x_axis).squeeze(1)
         inds_to_flip_y_axis = torch.nonzero(flip_y_axis).squeeze(1)
 
@@ -559,15 +560,49 @@ class SetCriterion(nn.Module):
         ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1] = - \
             ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1]
         ema_outputs["center_normalized"] = torch.bmm(
-            ema_outputs["center_normalized"], rot_mat.transpose(1, 2))
+            ema_outputs["center_normalized"], rot_mat_transposed)
+        
+        # repeat for center_unnormalized
+        ema_outputs["center_unnormalized"][inds_to_flip_x_axis, :, 0] = - \
+            ema_outputs["center_unnormalized"][inds_to_flip_x_axis, :, 0]
+        ema_outputs["center_unnormalized"][inds_to_flip_y_axis, :, 1] = - \
+            ema_outputs["center_unnormalized"][inds_to_flip_y_axis, :, 1]
+        ema_outputs["center_unnormalized"] = torch.bmm(
+            ema_outputs["center_unnormalized"], rot_mat_transposed)
+        
+        # box_corners_copy = ema_outputs["box_corners"].clone().detach() # for debugging
+        # also update the box corners
+        # ema_outputs["box_corners"] shape is (batch, nprop, 8, 3)
+        ema_outputs["box_corners"][inds_to_flip_x_axis, :, :, 0] = - \
+            ema_outputs["box_corners"][inds_to_flip_x_axis, :, :, 0]
+        ema_outputs["box_corners"][inds_to_flip_y_axis, :, :, 1] = - \
+            ema_outputs["box_corners"][inds_to_flip_y_axis, :, :, 1]
 
+        # Expand dimensions of rot_mat
+        rot_mat_transposed_expanded = rot_mat_transposed.unsqueeze(1)  # Adds a new dimension after the first dimension
+
+        # Perform batch matrix multiplication
+        ema_outputs["box_corners"] = torch.matmul(ema_outputs["box_corners"], rot_mat_transposed_expanded) # shape: (batch, nprop, 8, 3)
+
+        # ema_outputs["box_corners"] = torch.bmm(
+        #     ema_outputs["box_corners"], rot_mat.transpose(1, 2))
+
+        # for debugging        
+        # process the box_corners_copy and compare with ema_outputs["box_corners"]
+        # box_center_upright = flip_axis_to_camera_tensor(ema_outputs['center_unnormalized'])
+        # box_corners_copy_2 = get_3d_box_batch_tensor(
+        #     ema_outputs["size_unnormalized"], ema_outputs["angle_continuous"], box_center_upright
+        # )
+    
         # calculate ema gious
         ema_gious = generalized_box3d_iou(
             ema_outputs["box_corners"],
             targets["gt_box_corners"],
             targets["nactual_gt"],
             rotated_boxes=torch.any(targets["gt_box_angles"] > 0).item(),
-            needs_grad=(self.loss_weight_dict["loss_giou_weight"] > 0),
+            # needs_grad=(self.loss_weight_dict["loss_giou_weight"] > 0),
+            # do not need grad for ema gious
+            needs_grad=False,
         )
         ema_outputs["gious"] = ema_gious
 

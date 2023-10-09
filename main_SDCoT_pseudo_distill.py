@@ -277,8 +277,12 @@ def do_train(
 
             if is_primary() and (
                 len(
-                    best_val_metrics) == 0 or best_val_metrics[0.25]["mAP"] < ap25
+                    best_val_metrics) == 0 or best_val_metrics[0.25]["mAP"] < ap25 or epoch < 2:
             ):
+                print('Best val metrics updated.')
+                # Note that the loaded best_val_metrics is for base classes, which is 
+                # not directly comparable to the current metrics for base + novel classes.
+                # So we replace the loaded best_val_metrics with the current metrics.
                 best_val_metrics = metrics
                 filename = "checkpoint_best.pth"
                 save_checkpoint(

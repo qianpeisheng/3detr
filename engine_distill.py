@@ -18,7 +18,6 @@ from utils.dist import (
 )
 from utils import ramps
 
-
 def get_current_weight(epoch, weight, ramp_len):
     # ramp-up from https://arxiv.org/abs/1610.02242
     return weight * ramps.sigmoid_rampup(epoch, ramp_len)
@@ -77,6 +76,17 @@ def train_one_epoch(
 
     model.train()
     barrier()
+
+    # ramp up weight for consistency loss
+    curr_distill_weight_scale = get_current_weight(
+        curr_epoch, 1., args.distillation_ramp_len)
+    criterion.set_distill_weight_scale(curr_distill_weight_scale)
+    # log the current weight scale
+    if is_primary():
+        logger.log_scalars(
+            {'distill_weight scale': curr_distill_weight_scale}, curr_iter, prefix="Train_details/")
+        print(
+            f"Current distill weight scale: {curr_distill_weight_scale:.6f}")
 
     for batch_idx, batch_data_label in enumerate(dataset_loader):
         curr_time = time.time()

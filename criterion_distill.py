@@ -111,6 +111,9 @@ class SetCriterion(nn.Module):
             "loss_distill": self.loss_distill,
         }
 
+    def set_distill_weight_scale(self, distill_weight_scale):
+        self.distill_weight_scale = distill_weight_scale
+
     @torch.no_grad()
     def loss_cardinality(self, outputs, targets, assignments):
         # Count the number of predictions that are objects
@@ -126,8 +129,16 @@ class SetCriterion(nn.Module):
     def loss_distill(self, outputs, targets, assignments=None):
         # TODO try to include background class in distillation loss
         # distillation loss
-        output_cls_logits = outputs["sem_cls_logits"][..., :targets["outputs"]["sem_cls_logits"].shape[-1] - 1]
-        target_cls_logits = targets["outputs"]["sem_cls_logits"][..., :-1]
+
+        # TODO need to align this!
+        # output_cls_logits = outputs["sem_cls_logits"][..., :targets["outputs"]["sem_cls_logits"].shape[-1] - 1]
+        # target_cls_logits = targets["outputs"]["sem_cls_logits"][..., :-1]
+
+        # include background class in distillation loss
+        logits_indices = list(range(targets["outputs"]["sem_cls_logits"].shape[-1] - 1))
+        logits_indices.append(-1)
+        output_cls_logits = outputs["sem_cls_logits"][..., logits_indices]
+        target_cls_logits = targets["outputs"]["sem_cls_logits"]
         # normalize logits
         output_cls_logits = output_cls_logits - torch.mean(output_cls_logits, dim=-1, keepdim=True)
         target_cls_logits = target_cls_logits - torch.mean(target_cls_logits, dim=-1, keepdim=True)
@@ -371,6 +382,7 @@ class SetCriterion(nn.Module):
                         # print(k, " Using static outputs for distillation loss")
                         curr_loss = self.loss_functions[k](
                             outputs, outputs_static, assignments)
+                        
                 else:
                     curr_loss = self.loss_functions[k](
                         outputs, targets, assignments)
@@ -383,6 +395,10 @@ class SetCriterion(nn.Module):
             loss_name = k.replace("_weight", "")
             if self.loss_weight_dict[k] > 0 and loss_name in losses:
                     losses[loss_name] *= self.loss_weight_dict[k]
+
+                    # scale distillation loss
+                    if "distill" in loss_name:
+                        losses[loss_name] *= self.distill_weight_scale
                     final_loss += losses[loss_name]
         return final_loss, losses
 
@@ -399,6 +415,7 @@ class SetCriterion(nn.Module):
         loss, loss_dict = self.single_output_forward(
             outputs["outputs"], targets, outputs_static)
 
+        # also needs to distill and scale this.
         if "aux_outputs" in outputs:
             for k in range(len(outputs["aux_outputs"])):
                 interm_loss, interm_loss_dict = self.single_output_forward(

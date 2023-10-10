@@ -145,7 +145,7 @@ def make_args_parser():
                         default=0.999, help='ema variable decay rate')
 
     parser.add_argument('--consistency_ramp_len', type=int,
-                        default=30, help='length of the consistency loss ramp-up')
+                        default=100, help='length of the consistency loss ramp-up')
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
     parser.add_argument("--max_epoch", default=720, type=int)

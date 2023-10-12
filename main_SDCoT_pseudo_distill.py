@@ -135,7 +135,7 @@ def make_args_parser():
     parser.add_argument('--loss_distill_weight', type=float, default=1.0,
                         help='use distillation loss with given weight')
     parser.add_argument('--distillation_ramp_len', type=int,
-                        default=30, help='length of the stabilization loss ramp-up')
+                        default=100, help='length of the stabilization loss ramp-up')
 
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)

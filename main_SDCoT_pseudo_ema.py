@@ -429,11 +429,24 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
         curr_iter,
     )
     metrics = ap_calculator.compute_metrics()
+    for iou in [0.25, 0.5]:
+        metrics_25 = metrics[iou]
+        # metrics_25 is an OrderedDict, select the first k items
+        # average values in metrics_25_base is a dict with 9 keys
+        # each key has a value of a float
+        metrics_25_base = {k: metrics_25[k] for k in list(metrics_25)[:args.num_base_class]}
+        average_ap_base_25 = sum(metrics_25_base.values()) / len(metrics_25_base)
+        print(f'Base mAP {iou}: ', average_ap_base_25)
+
+        metrics_25_novel = {k: metrics_25[k] for k in list(metrics_25)[args.num_base_class:18]}
+        average_ap_novel_25 = sum(metrics_25_novel.values()) / len(metrics_25_novel)
+        print(f'novel mAP {iou}: ',average_ap_novel_25)
     metric_str = ap_calculator.metrics_to_str(metrics)
     if is_primary():
         print("==" * 10)
         print(f"Test model; Metrics {metric_str}")
         print("==" * 10)
+
 
 
 def main(local_rank, args):

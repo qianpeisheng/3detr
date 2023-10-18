@@ -302,7 +302,7 @@ def evaluate_incremental(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs, _ , _, _, _ = model(inputs) # query_xyz, pos_embed and enc_inds are not used
+        outputs, _ , _, _, _ ,_,_,_,_,_,_= model(inputs) # query_xyz, pos_embed and enc_inds are not used
 
         # Compute loss
         loss_str = ""

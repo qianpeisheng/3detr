@@ -108,7 +108,7 @@ class SetCriterion(nn.Module):
             # this isn't used during training and is logged for debugging.
             # thus, this loss does not have a loss_weight associated with it.
             "loss_cardinality": self.loss_cardinality,
-            "loss_distill": self.loss_distill,
+            "loss_distill": self.loss_distill_aux,
         }
 
     def set_distill_weight_scale(self, distill_weight_scale):
@@ -126,6 +126,31 @@ class SetCriterion(nn.Module):
         card_err = F.l1_loss(pred_objects.float(), targets["nactual_gt"])
         return {"loss_cardinality": card_err}
 
+    def loss_distill_aux(self, outputs, targets, assignments=None):
+        # TODO try to include background class in distillation loss
+        # distillation loss
+
+        # TODO need to align this!
+        # output_cls_logits = outputs["sem_cls_logits"][..., :targets["outputs"]["sem_cls_logits"].shape[-1] - 1]
+        # target_cls_logits = targets["outputs"]["sem_cls_logits"][..., :-1]
+
+        # include background class in distillation loss
+        # in this version, ["outputs"] or ["aux_outputs"] is handled by the caller.
+        logits_indices = list(
+            range(targets["sem_cls_logits"].shape[-1] - 1))
+        logits_indices.append(-1)
+        output_cls_logits = outputs["sem_cls_logits"][..., logits_indices]
+        target_cls_logits = targets["sem_cls_logits"]
+        # normalize logits
+        output_cls_logits = output_cls_logits - \
+            torch.mean(output_cls_logits, dim=-1, keepdim=True)
+        target_cls_logits = target_cls_logits - \
+            torch.mean(target_cls_logits, dim=-1, keepdim=True)
+        distill_loss = F.mse_loss(
+            output_cls_logits, target_cls_logits)
+        # -1 because last class is no-object
+        return {"loss_distill": distill_loss}
+
     def loss_distill(self, outputs, targets, assignments=None):
         # TODO try to include background class in distillation loss
         # distillation loss
@@ -135,13 +160,16 @@ class SetCriterion(nn.Module):
         # target_cls_logits = targets["outputs"]["sem_cls_logits"][..., :-1]
 
         # include background class in distillation loss
-        logits_indices = list(range(targets["outputs"]["sem_cls_logits"].shape[-1] - 1))
+        logits_indices = list(
+            range(targets["outputs"]["sem_cls_logits"].shape[-1] - 1))
         logits_indices.append(-1)
         output_cls_logits = outputs["sem_cls_logits"][..., logits_indices]
         target_cls_logits = targets["outputs"]["sem_cls_logits"]
         # normalize logits
-        output_cls_logits = output_cls_logits - torch.mean(output_cls_logits, dim=-1, keepdim=True)
-        target_cls_logits = target_cls_logits - torch.mean(target_cls_logits, dim=-1, keepdim=True)
+        output_cls_logits = output_cls_logits - \
+            torch.mean(output_cls_logits, dim=-1, keepdim=True)
+        target_cls_logits = target_cls_logits - \
+            torch.mean(target_cls_logits, dim=-1, keepdim=True)
         distill_loss = F.mse_loss(
             output_cls_logits, target_cls_logits)
         # -1 because last class is no-object
@@ -382,11 +410,11 @@ class SetCriterion(nn.Module):
                         # print(k, " Using static outputs for distillation loss")
                         curr_loss = self.loss_functions[k](
                             outputs, outputs_static, assignments)
-                        
+
                 else:
                     curr_loss = self.loss_functions[k](
                         outputs, targets, assignments)
-                    
+
                 if curr_loss is not None:
                     losses.update(curr_loss)
 
@@ -394,12 +422,12 @@ class SetCriterion(nn.Module):
         for k in self.loss_weight_dict:
             loss_name = k.replace("_weight", "")
             if self.loss_weight_dict[k] > 0 and loss_name in losses:
-                    losses[loss_name] *= self.loss_weight_dict[k]
+                losses[loss_name] *= self.loss_weight_dict[k]
 
-                    # scale distillation loss
-                    if "distill" in loss_name:
-                        losses[loss_name] *= self.distill_weight_scale
-                    final_loss += losses[loss_name]
+                # scale distillation loss
+                if "distill" in loss_name:
+                    losses[loss_name] *= self.distill_weight_scale
+                final_loss += losses[loss_name]
         return final_loss, losses
 
     def forward(self, outputs, targets, outputs_static=None):
@@ -412,14 +440,18 @@ class SetCriterion(nn.Module):
             "num_boxes_replica"
         ] = nactual_gt.sum().item()  # number of boxes on this worker for dist training
 
+        if outputs_static is None:
+            # to supress errors during evaluation
+            outputs_static = {'outputs': None, 'aux_outputs': None}
+
         loss, loss_dict = self.single_output_forward(
-            outputs["outputs"], targets, outputs_static)
+            outputs["outputs"], targets, outputs_static['outputs'])
 
         # also needs to distill and scale this.
         if "aux_outputs" in outputs:
             for k in range(len(outputs["aux_outputs"])):
                 interm_loss, interm_loss_dict = self.single_output_forward(
-                    outputs["aux_outputs"][k], targets, outputs_static
+                    outputs["aux_outputs"][k], targets, outputs_static['aux_outputs'][k]
                 )
 
                 loss += interm_loss

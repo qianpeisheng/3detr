@@ -18,6 +18,7 @@ from utils.dist import (
 )
 from utils import ramps
 
+
 def get_current_weight(epoch, weight, ramp_len):
     # ramp-up from https://arxiv.org/abs/1610.02242
     return weight * ramps.sigmoid_rampup(epoch, ramp_len)
@@ -76,7 +77,6 @@ def train_one_epoch(
 
     model.train()
 
-
     barrier()
 
     # ramp up weight for consistency loss
@@ -103,11 +103,12 @@ def train_one_epoch(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs, query_xyz, pos_embed, enc_inds, interim_inds, enc_pos, query_embed,box_features, enc_features, enc_xyz, pre_enc_features = model(inputs)
-        # outputs = {'outputs': {'sem_cls_logits', 'center_normalized', 'center_unnormalized', 'size_normalized', 'size_unnormalized', 
+        outputs, query_xyz, pos_embed, enc_inds, interim_inds, *_ = model(
+            inputs)
+        # outputs = {'outputs': {'sem_cls_logits', 'center_normalized', 'center_unnormalized', 'size_normalized', 'size_unnormalized',
         # 'angle_logits', 'angle_residual', 'angle_residual_normalized', 'angle_continuous', 'objectness_prob', 'sem_cls_prob', 'box_corners'}
         # 'aux_outputs':[same as outputs], length = num_decoder_layers - 1 (default: 8-1 = 7), and the last one is the final output}
-        # 
+        #
 
         # query_xyz: [B, N, 3], the query points for the decoder, N =256 which is the number of proposals/nqueries
         # pos_embed: [B, N, N], the positional embedding for the decoder, N =256 which is the number of proposals/nqueries
@@ -123,13 +124,12 @@ def train_one_epoch(
         # no gradient for static_teacher
         with torch.no_grad():
             # feed pos_embed to static_teacher; query_xyz and pos_embed are not used
-            outputs_static, query_xyz_static, pos_embed_static, enc_inds_static, interim_inds_static, enc_pos_static, query_embed_static, box_features_static, enc_features_static, enc_xyz_static, pre_enc_features_static = static_teacher(
+            outputs_static, *_ = static_teacher(
                 inputs=inputs, query_xyz=query_xyz, pos_embed=pos_embed, student_inds=enc_inds, interim_inds=interim_inds)
             # interim_inds are 0, 1, ..., 1023
 
         # check if pos_embed and pos_embed_static are the same
         # print(torch.all(torch.eq(pos_embed, pos_embed_static)))
-
 
         # Compute loss
         loss, loss_dict = criterion(outputs, batch_data_label, outputs_static)
@@ -222,7 +222,8 @@ def evaluate(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs, _ , _, _, _ = model(inputs) # query_xyz and pos_embed are not used
+        # query_xyz and pos_embed are not used
+        outputs, _, _, _, _ = model(inputs)
 
         # Compute loss
         loss_str = ""
@@ -302,12 +303,15 @@ def evaluate_incremental(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs, _ , _, _, _ ,_,_,_,_,_,_= model(inputs) # query_xyz, pos_embed and enc_inds are not used
+        # query_xyz, pos_embed and enc_inds are not used
+        outputs, *_ = model(inputs)
 
         # Compute loss
         loss_str = ""
         if criterion is not None:
-            loss, loss_dict = criterion(outputs=outputs, targets=batch_data_label, outputs_static=None) # outputs_static is not used
+            # outputs_static is not used
+            loss, loss_dict = criterion(
+                outputs=outputs, targets=batch_data_label, outputs_static=None)
 
             loss_reduced = all_reduce_average(loss)
             loss_dict_reduced = reduce_dict(loss_dict)

@@ -222,7 +222,7 @@ class Model3DETR(nn.Module):
         )
 
         if student_inds is not None:
-            # for static teacher 
+            # for static teacher
             if enc_inds is None:
                 # encoder does not perform any downsampling, vallina 3DETR
                 enc_inds = pre_enc_inds
@@ -234,7 +234,7 @@ class Model3DETR(nn.Module):
 
             # the returned pre_enc_inds and enc_inds from the static steacher are not used.
             return enc_xyz, enc_features, pre_enc_inds, enc_inds, pre_enc_features
-        
+
         else:
             # for student
             if enc_inds is None:
@@ -243,10 +243,10 @@ class Model3DETR(nn.Module):
             # else:
                 # use gather here to ensure that it works for both FPS and random sampling
                 # enc_inds = torch.gather(pre_enc_inds, 1, enc_inds.type(torch.int64))
-            # Note that we do not gather because end_inds from masked student encoder 
+            # Note that we do not gather because end_inds from masked student encoder
             # is used to index the pre_enc_inds from the static teacher.
             # This is different from original 3DETR.
-            
+
             return enc_xyz, enc_features, pre_enc_inds, enc_inds, pre_enc_features
 
     def get_box_predictions(self, query_xyz, point_cloud_dims, box_features):
@@ -353,12 +353,14 @@ class Model3DETR(nn.Module):
 
     def forward(self, inputs, query_xyz=None, pos_embed=None, encoder_only=False, student_inds=None, interim_inds=None):
         point_clouds = inputs["point_clouds"]
-        
+
         is_static_teacher = pos_embed is not None
         if is_static_teacher:
-            enc_xyz, enc_features, pre_enc_inds, interim_inds, pre_enc_features = self.run_encoder(point_clouds=point_clouds, student_inds=student_inds, interim_inds=interim_inds)
+            enc_xyz, enc_features, pre_enc_inds, interim_inds, pre_enc_features = self.run_encoder(
+                point_clouds=point_clouds, student_inds=student_inds, interim_inds=interim_inds)
         else:
-            enc_xyz, enc_features, pre_enc_inds, interim_inds, pre_enc_features = self.run_encoder(point_clouds=point_clouds)
+            enc_xyz, enc_features, pre_enc_inds, interim_inds, pre_enc_features = self.run_encoder(
+                point_clouds=point_clouds)
         enc_features = self.encoder_to_decoder_projection(
             enc_features.permute(1, 2, 0)
         ).permute(2, 0, 1)
@@ -452,7 +454,7 @@ def build_preencoder(args):
     # the preencoder is a Pointnet++ module, i,e. sa1
     preencoder = PointnetSAModuleVotes(
         radius=0.2,
-        nsample=64, # this is K in pointnet++ and is a hyperparameter
+        nsample=64,  # this is K in pointnet++ and is a hyperparameter
         npoint=args.preenc_npoints,
         mlp=mlp_dims,
         normalize_xyz=True,

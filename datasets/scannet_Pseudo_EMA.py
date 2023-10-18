@@ -286,8 +286,11 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
         # self.base_detector.share_memory()
         self.base_detector.eval()
 
+    def set_ema_detector(self, ema_detector):
+        self.ema_detector = ema_detector
+
     # Use the base detector to generate pseudo labels.
-    def generate_pseudo_labels(self, point_clouds, mins, maxes):
+    def generate_pseudo_labels(self, point_clouds, mins, maxes, model):
         '''
             inputs = {
             "point_clouds": batch_data_label["point_clouds"],
@@ -310,7 +313,7 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
             maxes).unsqueeze(0).cuda()
 
         with torch.no_grad():
-            outputs = self.base_detector(batch_data_label)
+            outputs = model(batch_data_label)
             # if outputs is a list, set outputs to the first element
             if isinstance(outputs, list) or isinstance(outputs, tuple):
                 outputs = outputs[0]
@@ -440,8 +443,23 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
         pseudo_labels = self.generate_pseudo_labels(
             point_cloud,
             point_cloud.min(axis=0)[:3],
-            point_cloud.max(axis=0)[:3]
+            point_cloud.max(axis=0)[:3],
+            self.base_detector
         )
+
+        # if use_ema_pseudo_label, get pseudo labels from ema detector and append to pseudo_labels
+        # if self.use_ema_pseudo_label:
+        # if True:
+        #     ema_pseudo_labels = self.generate_pseudo_labels(
+        #         point_cloud,
+        #         point_cloud.min(axis=0)[:3],
+        #         point_cloud.max(axis=0)[:3],
+        #         self.ema_detector
+        #     )
+        # import pdb
+        # pdb.set_trace()
+
+        # pseudo_labels.append(ema_pseudo_labels[0])
 
         # Convert the pseudo labels to the format of instance_bboxes
         converted_instance_bboxes = []

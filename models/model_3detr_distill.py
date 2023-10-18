@@ -233,7 +233,7 @@ class Model3DETR(nn.Module):
                 # the line above works because enc_inds is a subset of pre_enc_inds
 
             # the returned pre_enc_inds and enc_inds from the static steacher are not used.
-            return enc_xyz, enc_features, pre_enc_inds, enc_inds
+            return enc_xyz, enc_features, pre_enc_inds, enc_inds, pre_enc_features
         
         else:
             # for student
@@ -247,7 +247,7 @@ class Model3DETR(nn.Module):
             # is used to index the pre_enc_inds from the static teacher.
             # This is different from original 3DETR.
             
-            return enc_xyz, enc_features, pre_enc_inds, enc_inds
+            return enc_xyz, enc_features, pre_enc_inds, enc_inds, pre_enc_features
 
     def get_box_predictions(self, query_xyz, point_cloud_dims, box_features):
         """
@@ -356,9 +356,9 @@ class Model3DETR(nn.Module):
         
         is_static_teacher = pos_embed is not None
         if is_static_teacher:
-            enc_xyz, enc_features, pre_enc_inds, interim_inds = self.run_encoder(point_clouds=point_clouds, student_inds=student_inds, interim_inds=interim_inds)
+            enc_xyz, enc_features, pre_enc_inds, interim_inds, pre_enc_features = self.run_encoder(point_clouds=point_clouds, student_inds=student_inds, interim_inds=interim_inds)
         else:
-            enc_xyz, enc_features, pre_enc_inds, interim_inds = self.run_encoder(point_clouds=point_clouds)
+            enc_xyz, enc_features, pre_enc_inds, interim_inds, pre_enc_features = self.run_encoder(point_clouds=point_clouds)
         enc_features = self.encoder_to_decoder_projection(
             enc_features.permute(1, 2, 0)
         ).permute(2, 0, 1)
@@ -394,7 +394,7 @@ class Model3DETR(nn.Module):
         box_predictions = self.get_box_predictions(
             query_xyz, point_cloud_dims, box_features
         )
-        return box_predictions, query_xyz, pos_embed, pre_enc_inds, interim_inds
+        return box_predictions, query_xyz, pos_embed, pre_enc_inds, interim_inds, enc_pos, query_embed, box_features, enc_features, enc_xyz, pre_enc_features
 
     def enroll_weights(self, base_weights, base_bias):
         '''
@@ -449,9 +449,10 @@ class Model3DETR(nn.Module):
 
 def build_preencoder(args):
     mlp_dims = [3 * int(args.use_color), 64, 128, args.enc_dim]
+    # the preencoder is a Pointnet++ module, i,e. sa1
     preencoder = PointnetSAModuleVotes(
         radius=0.2,
-        nsample=64,
+        nsample=64, # this is K in pointnet++ and is a hyperparameter
         npoint=args.preenc_npoints,
         mlp=mlp_dims,
         normalize_xyz=True,

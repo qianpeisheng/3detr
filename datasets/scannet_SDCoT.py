@@ -309,6 +309,7 @@ class ScannetDetectionDataset_SDCoT(Dataset):
         batch_data_label["point_cloud_dims_max"] = torch.tensor(
             maxes).unsqueeze(0).cuda()
 
+        self.base_detector.eval()
         with torch.no_grad():
             outputs = self.base_detector(batch_data_label)
             # if outputs is a list, set outputs to the first element

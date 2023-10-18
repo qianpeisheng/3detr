@@ -75,6 +75,8 @@ def train_one_epoch(
     loss_avg = SmoothedValue(window_size=10)
 
     model.train()
+
+
     barrier()
 
     # ramp up weight for consistency loss
@@ -101,18 +103,33 @@ def train_one_epoch(
             "point_cloud_dims_min": batch_data_label["point_cloud_dims_min"],
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
-        outputs, query_xyz, pos_embed, enc_inds, interim_inds = model(inputs)
+        outputs, query_xyz, pos_embed, enc_inds, interim_inds, enc_pos, query_embed,box_features, enc_features, enc_xyz, pre_enc_features = model(inputs)
+        # outputs = {'outputs': {'sem_cls_logits', 'center_normalized', 'center_unnormalized', 'size_normalized', 'size_unnormalized', 
+        # 'angle_logits', 'angle_residual', 'angle_residual_normalized', 'angle_continuous', 'objectness_prob', 'sem_cls_prob', 'box_corners'}
+        # 'aux_outputs':[same as outputs], length = num_decoder_layers - 1 (default: 8-1 = 7), and the last one is the final output}
+        # 
+
+        # query_xyz: [B, N, 3], the query points for the decoder, N =256 which is the number of proposals/nqueries
+        # pos_embed: [B, N, N], the positional embedding for the decoder, N =256 which is the number of proposals/nqueries
+        # enc_inds: [B, N_1], the indices of the encoder points for the decoder, N_1 = 2048 which is the number of encoder points after pre-encoder
+        # interim_inds: [B, N_2], the indices of the encoder points for the decoder, N_2 = 1024 which is downsampled from N_1 = 2048 by half.
+
         # query_xyz and pos_embed are for static teacher to use the same query points and pos_embed as the student
         # end_inds is for the static teacher to use the same points after pre-encoder as the student
         # interim_inds is for the static teacher to use the same points after encoder as the student (optional)
         # because vallina transformer does not have point downsampling in the encoder, in which interim_inds is the same as enc_inds.
-
-
+        # also set the static teacher to train mode to make sure the batchnorm is updated
+        static_teacher.train()
         # no gradient for static_teacher
         with torch.no_grad():
             # feed pos_embed to static_teacher; query_xyz and pos_embed are not used
-            outputs_static, query_xyz_static, pos_embed_static, enc_inds_static, interim_inds_static = static_teacher(
+            outputs_static, query_xyz_static, pos_embed_static, enc_inds_static, interim_inds_static, enc_pos_static, query_embed_static, box_features_static, enc_features_static, enc_xyz_static, pre_enc_features_static = static_teacher(
                 inputs=inputs, query_xyz=query_xyz, pos_embed=pos_embed, student_inds=enc_inds, interim_inds=interim_inds)
+            # interim_inds are 0, 1, ..., 1023
+
+        # check if pos_embed and pos_embed_static are the same
+        # print(torch.all(torch.eq(pos_embed, pos_embed_static)))
+
 
         # Compute loss
         loss, loss_dict = criterion(outputs, batch_data_label, outputs_static)

@@ -442,7 +442,9 @@ class SetCriterion(nn.Module):
 
         if outputs_static is None:
             # to supress errors during evaluation
-            outputs_static = {'outputs': None, 'aux_outputs': None}
+            # outputs_static['aux_outputs'] is a list of size 8, each element is None.
+            outputs_static = {'outputs': None, 'aux_outputs': [None] * 8}
+            # outputs_static = {'outputs': None, 'aux_outputs': [None]}
 
         loss, loss_dict = self.single_output_forward(
             outputs["outputs"], targets, outputs_static['outputs'])

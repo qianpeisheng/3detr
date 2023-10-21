@@ -281,14 +281,15 @@ def do_train(
             # evaluate the model at epoch 1 for sanity check
 
             ap_calculator = evaluate_incremental(
-                args,
-                epoch,
-                model,
-                criterion_val,
-                dataset_config_val,
-                dataloaders["test"],
-                logger,
-                curr_iter,
+                args=args,
+                curr_epoch=epoch,
+                model=model,
+                criterion=None,  # do not compute loss for speed-up; Comment out to see test loss
+                dataset_config=dataset_config_val,
+                dataset_loader=dataloaders["test"],
+                logger=logger,
+                curr_train_iter=curr_iter,
+                test_prefix="Student ",
             )
             metrics = ap_calculator.compute_metrics()
             ap25 = metrics[0.25]["mAP"]

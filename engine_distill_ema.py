@@ -336,6 +336,7 @@ def evaluate_incremental(
     dataset_loader,
     logger,
     curr_train_iter,
+    test_prefix="Test",
 ):
 
     # ap calculator is exact for evaluation. This is slower than the ap calculator used during training.
@@ -390,7 +391,7 @@ def evaluate_incremental(
         if is_primary() and curr_iter % args.log_every == 0:
             mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
             print(
-                f"Evaluate {epoch_str}; Batch [{curr_iter}/{num_batches}]; {loss_str} Iter time {time_delta.avg:0.2f}; Mem {mem_mb:0.2f}MB"
+                f"{test_prefix} Evaluate {epoch_str}; Batch [{curr_iter}/{num_batches}]; {loss_str} Iter time {time_delta.avg:0.2f}; Mem {mem_mb:0.2f}MB"
             )
 
             test_dict = {}
@@ -405,6 +406,6 @@ def evaluate_incremental(
         # logger.log_scalars(
         #     loss_dict_reduced, curr_train_iter, prefix="Test_details/"
         # )
-        logger.log_scalars(test_dict, curr_train_iter, prefix="Test/")
+        logger.log_scalars(test_dict, curr_train_iter, prefix="{test_prefix}/")
 
     return ap_calculator

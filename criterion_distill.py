@@ -136,16 +136,45 @@ class SetCriterion(nn.Module):
 
         # include background class in distillation loss
         # in this version, ["outputs"] or ["aux_outputs"] is handled by the caller.
+
         logits_indices = list(
             range(targets["sem_cls_logits"].shape[-1] - 1))
         logits_indices.append(-1)
         output_cls_logits = outputs["sem_cls_logits"][..., logits_indices]
         target_cls_logits = targets["sem_cls_logits"]
+
+        # output_cls_logits is of shape [batch, nprop, nclass_base + 1] (last class is no-object)
+        # The last dimension is the logits for each class.
+        # Create a torch binary mask of shape [batch, nprop] for output_cls_logits where the no-objcect class is the max.
+        binary_mask_output = (output_cls_logits.argmax(-1) !=
+                              output_cls_logits.shape[-1] - 1)
+
+        # Create a torch binary mask of shape [batch, nprop] for target_cls_logits where the no-objcect class is the max.
+        binary_mask_target = (target_cls_logits.argmax(-1) !=
+                              target_cls_logits.shape[-1] - 1)
+
+        # combine the two masks. Either one of them is True -> the combined mask is True.
+        binary_mask = binary_mask_output | binary_mask_target
+
+        # count the number of True values in the combined mask.
+        # nprop = binary_mask.sum()
+
+        # remove the no-object class from the logits, because their magnitudes are very large.
+        output_cls_logits = output_cls_logits[..., :-1]
+        target_cls_logits = target_cls_logits[..., :-1]
+
         # normalize logits
         output_cls_logits = output_cls_logits - \
-            torch.mean(output_cls_logits, dim=-1, keepdim=True)
+            torch.mean(output_cls_logits, dim=-1,
+                       keepdim=True)  # shape: [batch, nprop, nclass_base]
         target_cls_logits = target_cls_logits - \
-            torch.mean(target_cls_logits, dim=-1, keepdim=True)
+            torch.mean(target_cls_logits, dim=-1,
+                       keepdim=True)  # shape: [batch, nprop, nclass_base]
+
+        # mask the logits with the combined mask.
+        output_cls_logits = output_cls_logits[binary_mask]
+        target_cls_logits = target_cls_logits[binary_mask]
+
         distill_loss = F.mse_loss(
             output_cls_logits, target_cls_logits)
         # -1 because last class is no-object

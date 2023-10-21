@@ -12,11 +12,11 @@ from torch.multiprocessing import set_start_method
 from torch.utils.data import DataLoader, DistributedSampler
 
 # 3DETR codebase specific imports
-from datasets import build_dataset_Pseudo_EMA
-from engine_ema import evaluate, train_one_epoch, evaluate_incremental
+from datasets import build_dataset_Pseudo_EMA  # build_dataset_SDCoT
+from engine_distill_ema import evaluate, train_one_epoch, evaluate_incremental
 from models import build_model
 from optimizer import build_optimizer
-from criterion_ema import build_criterion
+from criterion_distill_ema import build_criterion
 from utils.dist import init_distributed, is_distributed, is_primary, get_rank, barrier
 from utils.misc import my_worker_init_fn
 from utils.io import save_checkpoint, resume_if_possible, resume_if_possible_SDCoT
@@ -49,7 +49,7 @@ def make_args_parser():
         default="3detr",
         type=str,
         help="Name of the model",
-        choices=["3detr"],
+        choices=["3detr", "3detr_distill"],
     )
     # Encoder
     parser.add_argument(
@@ -133,18 +133,23 @@ def make_args_parser():
     # SDCoT specific args
     parser.add_argument("--num_base_class", default=9, type=int)
     parser.add_argument("--num_novel_class", default=0, type=int)
-    # parser.add_argument('--consistency_weight', type=float, default=10.0,
-    #                     help='use consistency loss with given weight')
-    parser.add_argument('--loss_center_consistency_weight', type=float, default=0.2,
+    parser.add_argument('--loss_distill_weight', type=float, default=1.0,
+                        help='use distillation loss with given weight')
+    parser.add_argument('--distillation_ramp_len', type=int,
+                        default=100, help='length of the stabilization loss ramp-up')
+
+    parser.add_argument('--loss_center_consistency_weight', type=float, default=0.1,
                         help='use consistency loss with given weight')
-    parser.add_argument('--loss_cls_consistency_weight', type=float, default=20.0,
+    parser.add_argument('--loss_cls_consistency_weight', type=float, default=10.0,
                         help='use consistency loss with given weight')
-    parser.add_argument('--loss_size_consistency_weight', type=float, default=2.0,
+    parser.add_argument('--loss_size_consistency_weight', type=float, default=1.0,
                         help='use consistency loss with given weight')
     parser.add_argument('--ema_decay', type=float,
                         default=0.999, help='ema variable decay rate')
     parser.add_argument('--consistency_ramp_len', type=int,
                         default=100, help='length of the consistency loss ramp-up')
+    # EMA specific args
+
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
     parser.add_argument("--max_epoch", default=720, type=int)
@@ -183,6 +188,7 @@ def do_train(
     dataset_config_val,
     dataloaders,
     best_val_metrics,
+    static_teacher=None
 ):
     """
     Main training loop.
@@ -221,6 +227,7 @@ def do_train(
             dataset_config_train,
             dataloaders["train"],
             logger,
+            static_teacher
         )
 
         # latest checkpoint is always stored in checkpoint.pth
@@ -274,16 +281,14 @@ def do_train(
             # evaluate the model at epoch 1 for sanity check
 
             ap_calculator = evaluate_incremental(
-                args=args,
-                curr_epoch=epoch,
-                model=model,
-                # ema_model = ema_model,
-                criterion=None,  # do not compute loss for speed-up; Comment out to see test loss
-                dataset_config=dataset_config_val,
-                dataset_loader=dataloaders["test"],
-                logger=logger,
-                curr_train_iter=curr_iter,
-                test_prefix="Student ",
+                args,
+                epoch,
+                model,
+                criterion_val,
+                dataset_config_val,
+                dataloaders["test"],
+                logger,
+                curr_iter,
             )
             metrics = ap_calculator.compute_metrics()
             ap25 = metrics[0.25]["mAP"]
@@ -370,7 +375,7 @@ def do_train(
         epoch,
         model,
         # criterion_val,
-        None,  # do not compute loss for speed-up; Comment out to see val loss
+        None,  # do not compute loss for speed-up; Comment out to see test loss
         dataset_config_val,
         dataloaders["test"],
         logger,
@@ -428,6 +433,7 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
         curr_iter,
     )
     metrics = ap_calculator.compute_metrics()
+    metric_str = ap_calculator.metrics_to_str(metrics)
     for iou in [0.25, 0.5]:
         metrics_25 = metrics[iou]
         # metrics_25 is an OrderedDict, select the first k items
@@ -444,7 +450,6 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
         average_ap_novel_25 = sum(
             metrics_25_novel.values()) / len(metrics_25_novel)
         print(f'novel mAP {iou}: ', average_ap_novel_25)
-    metric_str = ap_calculator.metrics_to_str(metrics)
     if is_primary():
         print("==" * 10)
         print(f"Test model; Metrics {metric_str}")
@@ -478,20 +483,22 @@ def main(local_rank, args):
 
     datasets, dataset_config_train, dataset_config_val, dataset_config_base = build_dataset_Pseudo_EMA(
         args)
+
     # define the base detection model and load weights
     base_detection_model, _ = build_model(args, dataset_config_base)
     base_detection_model = base_detection_model.cuda(local_rank)  # TODO add ddp
-    # load the base detection model
-    if not args.test_only:
-        resume_if_possible(
-            checkpoint_dir=args.checkpoint_dir, model_no_ddp=base_detection_model, optimizer=None, checkpoint_name=args.checkpoint_name
-        )
 
     # set base detection model to eval mode
     base_detection_model.eval()
     # freeze all base detection model parameters
     for name, param in base_detection_model.named_parameters():
         param.requires_grad = False
+
+    # load the base detection model
+    if not args.test_only:
+        resume_if_possible(
+            checkpoint_dir=args.checkpoint_dir, model_no_ddp=base_detection_model, optimizer=None, checkpoint_name=args.checkpoint_name
+        )
 
     # For the train set, set the base detector
     datasets['train'].set_base_detector(base_detection_model)
@@ -504,7 +511,6 @@ def main(local_rank, args):
     model, _ = build_model(args, dataset_config_train)
     model = model.cuda(local_rank)
     model_no_ddp = model
-
     # load the base detection model weights to the model partially
 
     def load_except_classifier(model, base_detection_model):
@@ -556,9 +562,6 @@ def main(local_rank, args):
     ema_model.cuda(local_rank)
     for param in ema_model.parameters():
         param.detach_()
-
-    # the code above makes the ema model have the same weights as the model
-    # and the ema model is not updated during training.
 
     criterion_train = build_criterion(args, dataset_config_train)
     criterion_train = criterion_train.cuda(local_rank)
@@ -630,6 +633,7 @@ def main(local_rank, args):
             dataset_config_val,
             dataloaders,
             best_val_metrics,
+            static_teacher=base_detection_model
         )
 
 

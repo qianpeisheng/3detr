@@ -286,7 +286,7 @@ def evaluate(
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
         # query_xyz and pos_embed are not used
-        outputs, _, _, _, _ = model(inputs)
+        outputs, *_ = model(inputs)
 
         # Compute loss
         loss_str = ""
@@ -368,7 +368,10 @@ def evaluate_incremental(
             "point_cloud_dims_max": batch_data_label["point_cloud_dims_max"],
         }
         # query_xyz, pos_embed and enc_inds are not used
-        outputs, *_ = model(inputs)
+        if args.model_name == '3detr_distill':
+            outputs, *_ = model(inputs)
+        else:
+            outputs = model(inputs)
 
         # Compute loss, skipped for faster evaluation
         loss_str = ""

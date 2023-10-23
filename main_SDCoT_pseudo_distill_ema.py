@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 
 # 3DETR codebase specific imports
 from datasets import build_dataset_Pseudo_EMA  # build_dataset_SDCoT
-from engine_distill_ema import evaluate, train_one_epoch, evaluate_incremental
+from engine_distill_ema import train_one_epoch, evaluate_incremental
 from models import build_model
 from optimizer import build_optimizer
 from criterion_distill_ema import build_criterion
@@ -357,7 +357,7 @@ def do_train(
                 filename = "checkpoint_best.pth"
                 save_checkpoint(
                     args.checkpoint_dir,
-                    model_no_ddp,
+                    ema_model,
                     optimizer,
                     epoch,
                     args,
@@ -415,7 +415,6 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
         sys.exit(1)
 
     sd = torch.load(args.test_ckpt, map_location=torch.device("cpu"))
-
     # we already loaded the base detection model weights to the model partially
     if args.test_only:
         model_no_ddp.load_state_dict(sd["model"])
@@ -423,7 +422,7 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
     criterion_val = None  # do not compute loss for speed-up; Comment out to see test loss
     epoch = -1
     curr_iter = 0
-    ap_calculator = evaluate(
+    ap_calculator = evaluate_incremental(
         args,
         epoch,
         model,

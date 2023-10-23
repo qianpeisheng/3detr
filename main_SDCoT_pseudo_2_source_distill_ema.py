@@ -152,6 +152,7 @@ def make_args_parser():
 
     # ema pseudo labels
     parser.add_argument("--use_ema_pseudo_label", default=False, action="store_true")
+    parser.add_argument("--ema_nms_threshold", type=float, default=0.5, help="nms threshold for ema pseudo labels")
 
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
@@ -245,7 +246,7 @@ def do_train(
         )
 
         metrics = aps.compute_metrics()
-        metric_str = aps.metrics_to_str(metrics, per_class=True)
+        metric_str = aps.metrics_to_str(metrics, per_class=False) # not using per class to save space
         metrics_dict = aps.metrics_to_dict(metrics)
         curr_iter = epoch * len(dataloaders["train"])
         if is_primary():
@@ -569,7 +570,6 @@ def main(local_rank, args):
 
     # train dataset set the ema detector
     datasets['train'].set_ema_detector(ema_model)
-    import pdb; pdb.set_trace()
 
     criterion_train = build_criterion(args, dataset_config_train)
     criterion_train = criterion_train.cuda(local_rank)

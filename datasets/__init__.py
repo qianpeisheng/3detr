@@ -199,7 +199,8 @@ def build_dataset_Pseudo_2_source_EMA(args):
             meta_data_dir=args.meta_data_dir,
             use_color=args.use_color,
             augment=True,
-            use_ema_pseudo_label=args.use_ema_pseudo_label
+            use_ema_pseudo_label=args.use_ema_pseudo_label,
+            nms_threshold = args.ema_nms_threshold
         ),
         "test": dataset_builder_test(
             dataset_config_val,

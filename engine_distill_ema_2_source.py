@@ -111,13 +111,31 @@ def train_one_epoch(
             {'consistent_weight scale': curr_consistent_weight_scale}, curr_iter, prefix="Train_details/")
         print(
             f"Current consistent weight scale: {curr_consistent_weight_scale:.6f}")
-
+    num_no_obj = 0
+    num_no_base_obj = 0
     for batch_idx, batch_data_label in enumerate(dataset_loader):
         curr_time = time.time()
         curr_lr = adjust_learning_rate(args, optimizer, curr_iter / max_iters)
         for key in batch_data_label:
-            batch_data_label[key] = batch_data_label[key].to(net_device)
-
+            # do not move scanname, no_obj and no_cls_obj to GPU as they are used for debugging
+            if key not in ['no_obj', 'no_base_obj']:
+                batch_data_label[key] = batch_data_label[key].to(net_device)
+        # scan_names = batch_data_label['scan_name']
+        # # filter scan_names by batch_data_label['no_obj'] which are 0s and 1s
+        # scan_names_no_obj = [scan_names[i] for i in range(
+        #     len(scan_names)) if batch_data_label['no_obj'][i] == 1]
+        # # filter scan_names by batch_data_label['no_base_obj'] which are 0s and 1s
+        # scan_names_no_base_obj = [scan_names[i] for i in range(
+        #     len(scan_names)) if batch_data_label['no_base_obj'][i] == 1]
+        # log scan_names_no_obj
+        num_no_obj += sum(batch_data_label['no_obj']) #torch.sum(batch_data_label['no_obj'])
+        num_no_base_obj += sum(batch_data_label['no_base_obj']) # torch.sum(batch_data_label['no_base_obj'])
+            
+        #     logger.log_scalars(
+        #         {'scan_names_no_obj': scan_names_no_obj}, curr_iter, prefix="Train_details/")
+        # # log scan_names_no_base_obj
+        #     logger.log_scalars(
+        #         {'scan_names_no_base_obj': scan_names_no_base_obj}, curr_iter, prefix="Train_details/")
         # Forward pass
         optimizer.zero_grad()
         inputs = {
@@ -200,8 +218,11 @@ def train_one_epoch(
             mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
             eta_seconds = (max_iters - curr_iter) * time_delta.avg
             eta_str = str(datetime.timedelta(seconds=int(eta_seconds)))
+            log_every_times_batchsize = args.log_every * args.batchsize_per_gpu
+            no_obj_rate = num_no_obj / log_every_times_batchsize
+            no_base_obj_rate = num_no_base_obj / log_every_times_batchsize
             print(
-                f"Epoch [{curr_epoch}/{args.max_epoch}]; Iter [{curr_iter}/{max_iters}]; Loss {loss_avg.avg:0.2f}; Distill {loss_dict_reduced['loss_distill']:.3f}; Center_con {loss_dict_reduced['loss_center_consistency']:.3f}; Cls_con {loss_dict_reduced['loss_cls_consistency']:.3f}; Size_con {loss_dict_reduced['loss_size_consistency']:.3f}; LR {curr_lr:0.2e}; Iter time {time_delta.avg:0.2f}; ETA {eta_str}; Mem {mem_mb:0.2f}MB"
+                f"Epoch [{curr_epoch}/{args.max_epoch}]; Iter [{curr_iter}/{max_iters}]; No_obj: {no_obj_rate:.3f}; No_base_obj: {no_base_obj_rate:.3f} Loss {loss_avg.avg:0.2f}; Distill {loss_dict_reduced['loss_distill']:.3f}; Center_con {loss_dict_reduced['loss_center_consistency']:.3f}; Cls_con {loss_dict_reduced['loss_cls_consistency']:.3f}; Size_con {loss_dict_reduced['loss_size_consistency']:.3f}; LR {curr_lr:0.2e}; Iter time {time_delta.avg:0.2f}; ETA {eta_str}; Mem {mem_mb:0.2f}MB"
             )
             logger.log_scalars(loss_dict_reduced, curr_iter,
                                prefix="Train_details/")
@@ -211,6 +232,8 @@ def train_one_epoch(
             train_dict["memory"] = mem_mb
             train_dict["loss"] = loss_avg.avg
             train_dict["batch_time"] = time_delta.avg
+            train_dict['no_obj_rate'] = no_obj_rate
+            train_dict['no_base_obj_rate'] = no_base_obj_rate
 
             # log losses
             # "loss_sem_cls": self.loss_sem_cls,
@@ -236,6 +259,10 @@ def train_one_epoch(
             train_dict['loss_size_consistency'] = loss_dict_reduced['loss_size_consistency']
 
             logger.log_scalars(train_dict, curr_iter, prefix="Train/")
+
+            # reset num_no_obj and num_no_base_obj
+            num_no_obj = 0
+            num_no_base_obj = 0
 
         curr_iter += 1
 

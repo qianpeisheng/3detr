@@ -228,9 +228,11 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         augment=False,  # True for training, False for testing
         use_random_cuboid=True,
         random_cuboid_min_points=30000,
-        use_ema_pseudo_label = False # whether to use ema pseudo label
+        use_ema_pseudo_label = False, # whether to use ema pseudo label
+        nms_threshold = 0.5
     ):
         self.use_ema_pseudo_label = use_ema_pseudo_label
+        self.nms_threshold = nms_threshold
 
         self.dataset_config = dataset_config
         assert split_set in ["train", "val"]
@@ -365,7 +367,7 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
     def set_ap_config_dict(self, ap_config_dict):
         self.ap_config_dict = ap_config_dict
 
-    def convert_to_n_8(self, pseudo_labels):
+    def convert_to_nms_in(self, pseudo_labels):
         # pseudo_labels is a list of length 1.
         # pseudo_labels[0] is a list of length K, where K is the number of pseudo labels.
         # pseudo_labels[0][i] is a tuple of length 3. The first element is the class index.
@@ -377,12 +379,25 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         # the seventh column is the probability of the class,
         # the eighth column is the class index.
 
-        n_8_pseudo_labels = np.zeros((len(pseudo_labels[0]), 8))
-        # n_8_pseudo_labels[:,0] is x1
-        n_8_pseudo_labels[:, 0] = pseudo_labels[0][1][:, 0].min(axis=0)
-        # n_8_pseudo_labels[0][0] = ema_out[0][0][1][:,0].min()
-        n_
-        return pseudo_labels
+        nms_in_pseudo_labels = np.zeros((len(pseudo_labels[0]), 8))
+        # x1
+        nms_in_pseudo_labels[:, 0] = [pseudo_labels[0][i][1][:, 0].min(axis=0) for i in range(len(pseudo_labels[0]))]
+        # y1
+        nms_in_pseudo_labels[:, 1] = [pseudo_labels[0][i][1][:, 1].min(axis=0) for i in range(len(pseudo_labels[0]))]
+        # z1
+        nms_in_pseudo_labels[:, 2] = [pseudo_labels[0][i][1][:, 2].min(axis=0) for i in range(len(pseudo_labels[0]))]
+        # x2
+        nms_in_pseudo_labels[:, 3] = [pseudo_labels[0][i][1][:, 0].max(axis=0) for i in range(len(pseudo_labels[0]))]
+        # y2
+        nms_in_pseudo_labels[:, 4] = [pseudo_labels[0][i][1][:, 1].max(axis=0) for i in range(len(pseudo_labels[0]))]
+        # z2
+        nms_in_pseudo_labels[:, 5] = [pseudo_labels[0][i][1][:, 2].max(axis=0) for i in range(len(pseudo_labels[0]))]
+        # score
+        nms_in_pseudo_labels[:, 6] = [pseudo_labels[0][i][2] for i in range(len(pseudo_labels[0]))]
+        # class
+        nms_in_pseudo_labels[:, 7] = [pseudo_labels[0][i][0] for i in range(len(pseudo_labels[0]))]
+
+        return nms_in_pseudo_labels
 
     def __len__(self):
         return len(self.scan_names)
@@ -401,9 +416,12 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             self.data_path, scan_name) + "_bbox.npy")
 
         # Filter instance_bboxes and keep only those with classes that are in the dataset_config
+        # print(f'{idx}, N instance_bboxes before filtering: ', len(instance_bboxes))
         instance_bboxes = instance_bboxes[
             np.isin(instance_bboxes[:, -1], self.dataset_config.nyu40ids_novel)
         ]
+        # print the number of instance_bboxes before and after filtering
+        # print(f'{idx}, N instance_bboxes after filtering: ', len(instance_bboxes))
 
         if not self.use_color:
             point_cloud = mesh_vertices[:, 0:3]  # do not use color for now
@@ -476,15 +494,45 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         # if use_ema_pseudo_label, get pseudo labels from ema detector and append to pseudo_labels
         if self.use_ema_pseudo_label:
             ema_pseudo_labels = self.generate_pseudo_labels(
-                point_cloud,
-                point_cloud.min(axis=0)[:3],
-                point_cloud.max(axis=0)[:3],
+                ema_point_cloud,
+                ema_point_cloud.min(axis=0)[:3],
+                ema_point_cloud.max(axis=0)[:3],
                 self.ema_detector
             )
 
-        return pseudo_labels, ema_pseudo_labels
-        import pdb
-        pdb.set_trace()
+            no_base_obj = 0
+            no_obj = 0
+            # NMS
+            if len(ema_pseudo_labels[0]) > 0:
+                # select only base classes from ema_pseudo_labels, i.e., not novel classes
+                ema_pseudo_labels[0] = [ema_pseudo_labels[0][i] for i in range(len(ema_pseudo_labels[0])) if ema_pseudo_labels[0][i][0] < self.dataset_config.num_base_class]
+                if len(ema_pseudo_labels[0]) > 0:
+                    # convert ema_pseudo_labels to nms_in format
+                    nms_in_ema_pseudo_labels = self.convert_to_nms_in(ema_pseudo_labels)
+                    nms_in_pseudo_labels = self.convert_to_nms_in(pseudo_labels)
+                    # combine nms_in_pseudo_labels and nms_in_ema_pseudo_labels
+                    nms_in_pseudo_labels_combined = np.concatenate((nms_in_pseudo_labels, nms_in_ema_pseudo_labels), axis=0)
+                    # use nms_3d_faster_samecls to get the final pseudo labels
+                    nms_out_pseudo_labels = nms_3d_faster_samecls(nms_in_pseudo_labels_combined, self.nms_threshold, old_type=False)
+                    # filter nms_in_pseudo_labels_combined by nms_out_pseudo_labels
+                    nms_in_pseudo_labels_combined_filtered = nms_in_pseudo_labels_combined[nms_out_pseudo_labels]
+
+                    # convert nms_in_pseudo_labels_combined_filtered to pseudo_labels' format
+                    pseudo_labels_filtered = []
+                    for i in range(len(nms_in_pseudo_labels_combined_filtered)):
+                        pseudo_labels_filtered.append((int(nms_in_pseudo_labels_combined_filtered[i][7]), np.array([[nms_in_pseudo_labels_combined_filtered[i][0], nms_in_pseudo_labels_combined_filtered[i][1], nms_in_pseudo_labels_combined_filtered[i][2]],
+                                                                                                                    [nms_in_pseudo_labels_combined_filtered[i][3], nms_in_pseudo_labels_combined_filtered[i][4], nms_in_pseudo_labels_combined_filtered[i][5]]], dtype=np.float32), nms_in_pseudo_labels_combined_filtered[i][6]))
+                    # print the number of pseudo labels before and after NMS
+                    # print(f'{idx} N pseudo labels before NMS: ', len(nms_in_pseudo_labels_combined))
+                    # print(f'{idx} N pseudo labels after NMS: ', len(nms_in_pseudo_labels_combined_filtered))
+                    # let pseudo_labels be pseudo_labels_filtered
+                    pseudo_labels = [pseudo_labels_filtered] # pseudo_labels is a list of length 1
+                else:
+                    # print(f'{scan_name} ema no base cls obj')
+                    no_base_obj = 1
+            else:
+                # print(f'{scan_name} ema no obj')
+                no_obj = 1
 
         # pseudo_labels.append(ema_pseudo_labels[0])
 
@@ -639,6 +687,9 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         ret_dict['flip_x_axis'] = np.array(flip_x_axis).astype(np.int64)
         ret_dict['flip_y_axis'] = np.array(flip_y_axis).astype(np.int64)
         ret_dict['rot_mat'] = rot_mat.astype(np.float32)
+        ret_dict['no_base_obj'] = no_base_obj#np.array(no_base_obj).astype(np.int64)
+        ret_dict['no_obj'] = no_obj#np.array(no_obj).astype(np.int64)
+        # ret_dict['scan_name'] = scan_name
 
         return ret_dict
 

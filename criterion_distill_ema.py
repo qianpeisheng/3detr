@@ -135,6 +135,23 @@ class SetCriterion(nn.Module):
         return {"loss_cardinality": card_err}
 
     def loss_center_consistency_all(self, outputs, ema_outputs):
+        # similar to distillation loss, mask out where the no-object class is the max.
+        # following the 3DIoUMatch implementation
+
+        # output_cls_logits is of shape [batch, nprop, nclass + 1] (last class is no-object)
+        # The last dimension is the logits for each class.
+        # Create a torch binary mask of shape [batch, nprop] for output_cls_logits where the no-objcect class is the max.
+
+        # binary_mask_output = (outputs["sem_cls_logits"].argmax(-1) !=
+        #                       outputs["sem_cls_logits"].shape[-1] - 1)
+
+        # sum the binary mask along the second dimension to get the number of objects in each batch
+        # nprop = binary_mask_output.sum(1)
+
+        # Create a torch binary mask of shape [batch, nprop] for target_cls_logits where the no-objcect class is the max.
+        # binary_mask_ema_output = (ema_outputs["sem_cls_logits"].argmax(-1) !=
+        #                           ema_outputs["sem_cls_logits"].shape[-1] - 1)
+
         # follow the SDCoT implementation
         # center = outputs["center_normalized"].clone()
         # ema_center = ema_outputs["center_normalized"].clone()
@@ -142,41 +159,136 @@ class SetCriterion(nn.Module):
         # shape (B, num_proposal, 3)
         ema_center = ema_outputs["center_normalized"]
 
+        # filter center with binary_mask_output, centeris of shape (B, num_proposal, 3), binary_mask_output is of shape (B, num_proposal)
+        # the filtering should be done on both the first and second dimension.
+        # center *= binary_mask_output.unsqueeze(-1)
+        # ema_center *= binary_mask_ema_output.unsqueeze(-1)
+
+        # # keep only the non-zero elements and keep the dimension
+        # center = center[center != 0].view(center.shape[0], -1, 3)
+
+        # masked center and ema_center do not participate in the gradient computation
+
+        # show min, max, mean, std of dist1 and dist2
         dist1, ind1, dist2, ind2 = nn_distance(center, ema_center)
+
+        # create a binary mask for dist2 where dist2[i] < dist2[i].mean() - dist2[i].std()
+        masked_dist2 = dist2.clone().detach()
+        for i in range(masked_dist2.shape[0]):
+            masked_dist2[i][dist2[i] > dist2[i].mean() - dist2[i].std()] = False
+            masked_dist2[i][dist2[i] <= dist2[i].mean() - dist2[i].std()] = True
+
+        # masked_dist2 = [ind2[i][dist2[i] < dist2[i].mean() - dist2[i].std()]
+        #              for i in range(ind2.shape[0])]
+
+        # average dist1 only where dist1[i] < dist1[i].mean() - dist1[i].std()
+        dist1_list = [dist1[i][dist1[i] < dist1[i].mean() - dist1[i].std()]
+                      for i in range(dist1.shape[0])]
+        dist1 = torch.cat(dist1_list)
+        dist1 = torch.mean(dist1)
+
+        # average dist2 only where dist2[i] < dist2[i].mean() - dist2[i].std()
+        dist2_list = [dist2[i][dist2[i] < dist2[i].mean() - dist2[i].std()]
+                      for i in range(dist2.shape[0])]
+        dist2 = torch.cat(dist2_list)
+        dist2 = torch.mean(dist2)
+        # dist1_list = []
+        # dist2_list = []
+        # ind1_list = []
+        # masked_dist2 = []
+        # for i in range(center.shape[0]):
+        #     # maks center[i] with binary_mask_output[i]
+        #     # center[i] is of shape (num_proposal, 3)
+        #     # binary_mask_output[i] is of shape (num_proposal)
+        #     center_i = center[i].unsqueeze(0)
+        #     center_i_masked = center_i[:, binary_mask_output[i]]
+        #     ema_center_i = ema_center[i].unsqueeze(0)
+        #     ema_center_i_masked = ema_center_i[:, binary_mask_ema_output[i]]
+        #     dist1, ind1, dist2, ind2 = nn_distance(
+        #         center_i_masked, ema_center_i_masked)
+        #     dist1_list.append(dist1)
+        #     dist2_list.append(dist2)
+        #     ind1_list.append(ind1)
+        #     masked_dist2.append(ind2)
+
+        # dist1 is the sum of dist1_list
+        # dist2 is the sum of dist2_list
+
         # ind1 is (B, num_proposal): ema_center index closest to center
         # ind2 is (B, num_proposal): center index closest to ema_center
 
         # TODO: use both dist1 and dist2 or only use dist1
-        dist = dist1 + dist2
+        # dist = dist1 + dist2
         # return torch.mean(dist), ind2
-        return {"loss_center_consistency": torch.mean(dist)}, ind2
+        # return {"loss_center_consistency": torch.mean(dist)}, ind2, masked_dist2
+        return {"loss_center_consistency": dist1 + dist2}, ind2, masked_dist2
 
-    def loss_class_consistency_all(self, outputs, ema_outputs, map_ind):
+    def loss_class_consistency_all(self, outputs, ema_outputs, map_ind, masked_dist2):
 
         # follow the SDCoT implementation
         sem_cls_logits = outputs["sem_cls_logits"]
-        sem_cls_prob_log = F.log_softmax(
-            sem_cls_logits, dim=-1)  # for kl_div loss
+
+        # sem_cls_prob_log = F.log_softmax(
+        #     sem_cls_logits, dim=-1)  # for kl_div loss
+
         ema_cls_logits = ema_outputs["sem_cls_logits"]
-        ema_sem_cls_prob = F.softmax(ema_cls_logits, dim=-1)
 
-        cls_log_prob_aligned = torch.cat([torch.index_select(
-            a, 0, i).unsqueeze(0) for a, i in zip(sem_cls_prob_log, map_ind)])
+        # ema_sem_cls_prob = F.softmax(ema_cls_logits, dim=-1)
 
-        class_consistency_loss = F.kl_div(
-            cls_log_prob_aligned, ema_sem_cls_prob, reduction='mean')
+        cls_logits_aligned = torch.cat([torch.index_select(
+            a, 0, i).unsqueeze(0) for a, i in zip(sem_cls_logits, map_ind)])
+
+        # cls_log_prob_aligned = torch.cat([torch.index_select(
+        #     a, 0, i).unsqueeze(0) for a, i in zip(sem_cls_prob_log, map_ind)])
+
+        # class_consistency_loss = F.kl_div(
+        #     cls_log_prob_aligned, ema_sem_cls_prob, reduction='mean')
+
+        # filter by masked_dist2
+        cls_logits_aligned = cls_logits_aligned * masked_dist2.unsqueeze(-1)
+        ema_cls_logits = ema_cls_logits * masked_dist2.unsqueeze(-1)
         # class_consistency_loss = F.mse_loss(cls_log_prob_aligned, ema_cls_prob)
+        # exclude the last class (no-object class)
+        class_consistency_loss = F.mse_loss(
+            cls_logits_aligned[..., :-1], ema_cls_logits[..., :-1])
 
         # return class_consistency_loss*2
-        return {"loss_cls_consistency": class_consistency_loss*2}
+        return {"loss_cls_consistency": class_consistency_loss}
 
-    def loss_size_consistency_all(self, outputs, ema_outputs, map_ind):
+    # def loss_class_consistency_all(self, outputs, ema_outputs, map_ind, masked_dist2):
+
+    #     # follow the SDCoT implementation
+    #     sem_cls_logits = outputs["sem_cls_logits"]
+
+    #     sem_cls_prob_log = F.log_softmax(
+    #         sem_cls_logits, dim=-1)  # for kl_div loss
+
+    #     ema_cls_logits = ema_outputs["sem_cls_logits"]
+
+    #     ema_sem_cls_prob = F.softmax(ema_cls_logits, dim=-1)
+
+    #     cls_log_prob_aligned = torch.cat([torch.index_select(
+    #         a, 0, i).unsqueeze(0) for a, i in zip(sem_cls_prob_log, map_ind)])
+
+    #     class_consistency_loss = F.kl_div(
+    #         cls_log_prob_aligned, ema_sem_cls_prob, reduction='mean')
+    #     # class_consistency_loss = F.mse_loss(cls_log_prob_aligned, ema_cls_prob)
+
+    #     # return class_consistency_loss*2
+    #     return {"loss_cls_consistency": class_consistency_loss}
+
+    def loss_size_consistency_all(self, outputs, ema_outputs, map_ind, masked_dist2):
         # follow the SDCoT implementation
         size_normalized = outputs["size_normalized"]
         ema_size_normalized = ema_outputs["size_normalized"]
 
         size_aligned = torch.cat([torch.index_select(
             a, 0, i).unsqueeze(0) for a, i in zip(size_normalized, map_ind)])
+
+        # filter by masked_dist2
+        size_aligned = size_aligned * masked_dist2.unsqueeze(-1)
+        ema_size_normalized = ema_size_normalized * masked_dist2.unsqueeze(-1)
+
         size_consistency_loss = F.mse_loss(
             size_aligned, ema_size_normalized, reduction='mean')
 
@@ -556,11 +668,11 @@ class SetCriterion(nn.Module):
                 and self.loss_weight_dict[loss_wt_key] > 0
             ) or loss_wt_key not in self.loss_weight_dict:
                 if 'center_consistency' in k:
-                    curr_loss, indices = self.loss_functions[k](
+                    curr_loss, indices, masked_dist2 = self.loss_functions[k](
                         outputs, ema_outputs)
                 elif 'cls_consistency' in k or 'size_consistency' in k:
                     curr_loss = self.loss_functions[k](
-                        outputs, ema_outputs, indices)
+                        outputs, ema_outputs, indices, masked_dist2)
                 # only compute losses with loss_wt > 0
                 # certain losses like cardinality are only logged and have no loss weight
                 # use static outputs for distillation loss

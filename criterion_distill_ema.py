@@ -175,20 +175,22 @@ class SetCriterion(nn.Module):
         # create a binary mask for dist2 where dist2[i] < dist2[i].mean() - dist2[i].std()
         masked_dist2 = dist2.clone().detach()
         for i in range(masked_dist2.shape[0]):
-            masked_dist2[i][dist2[i] > dist2[i].mean() - dist2[i].std()] = False
-            masked_dist2[i][dist2[i] <= dist2[i].mean() - dist2[i].std()] = True
+            _threshold_2 = dist2[i].min() + 0.2*(dist2[i].max() - dist2[i].min())
+            masked_dist2[i][dist2[i] > _threshold_2] = False
+            masked_dist2[i][dist2[i] <= _threshold_2] = True
 
         # masked_dist2 = [ind2[i][dist2[i] < dist2[i].mean() - dist2[i].std()]
         #              for i in range(ind2.shape[0])]
 
         # average dist1 only where dist1[i] < dist1[i].mean() - dist1[i].std()
-        dist1_list = [dist1[i][dist1[i] < dist1[i].mean() - dist1[i].std()]
+        _threshold_1 = dist1.min() + 0.2*(dist1.max() - dist1.min())
+        dist1_list = [dist1[i][dist1[i] <= _threshold_1]
                       for i in range(dist1.shape[0])]
         dist1 = torch.cat(dist1_list)
         dist1 = torch.mean(dist1)
 
         # average dist2 only where dist2[i] < dist2[i].mean() - dist2[i].std()
-        dist2_list = [dist2[i][dist2[i] < dist2[i].mean() - dist2[i].std()]
+        dist2_list = [dist2[i][dist2[i] <= _threshold_2]
                       for i in range(dist2.shape[0])]
         dist2 = torch.cat(dist2_list)
         dist2 = torch.mean(dist2)

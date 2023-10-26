@@ -367,12 +367,7 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
         scan_name = self.scan_names[idx]
         mesh_vertices = np.load(os.path.join(
             self.data_path, scan_name) + "_vert.npy")
-        instance_labels = np.load(
-            os.path.join(self.data_path, scan_name) + "_ins_label.npy"
-        )
-        semantic_labels = np.load(
-            os.path.join(self.data_path, scan_name) + "_sem_label.npy"
-        )
+
         instance_bboxes = np.load(os.path.join(
             self.data_path, scan_name) + "_bbox.npy")
 
@@ -410,10 +405,8 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
                 instance_bboxes,
                 per_point_labels,
             ) = self.random_cuboid_augmentor(
-                point_cloud, instance_bboxes, [instance_labels, semantic_labels]
+                point_cloud, instance_bboxes,
             )
-            instance_labels = per_point_labels[0]
-            semantic_labels = per_point_labels[1]
 
         point_cloud, choices = pc_util.random_sampling(
             point_cloud, self.num_points, return_choices=True
@@ -424,17 +417,8 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
             point_cloud, self.num_points, return_choices=False
         )
 
-        instance_labels = instance_labels[choices]
-        semantic_labels = semantic_labels[choices]
 
         # uncomment to use semantic labels
-
-        # sem_seg_labels = np.ones_like(semantic_labels) * IGNORE_LABEL
-
-        # for _c in self.dataset_config.nyu40ids_semseg:
-        #     sem_seg_labels[
-        #         semantic_labels == _c
-        #     ] = self.dataset_config.nyu40id2class_semseg[_c]
 
         pcl_color = pcl_color[choices]
 

@@ -160,3 +160,60 @@ def nms_3d_faster_samecls(boxes, overlap_threshold, old_type=False):
         )
 
     return pick
+
+def should_do_nms(cls1, cls2, num_base_cls):
+    if (cls1 - num_base_cls) * (cls2 - num_base_cls) < 0:
+        # one of them is base class, the other is novel class.
+        return True
+    else:
+        # both of them are base class or novel class.
+        return False
+
+def nms_3d_faster_base_novel(boxes, overlap_threshold, num_base_cls, old_type=False):
+    '''
+    Remove base class boxes if they overlap with novel class boxes.
+    Because during incremental learning, the base class boxes are pseudo labeled.
+    '''
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    z1 = boxes[:, 2]
+    x2 = boxes[:, 3]
+    y2 = boxes[:, 4]
+    z2 = boxes[:, 5]
+    score = boxes[:, 6]
+    cls = boxes[:, 7]
+    area = (x2 - x1) * (y2 - y1) * (z2 - z1)
+
+    I = np.argsort(score)
+    pick = []
+    while I.size != 0:
+        last = I.size
+        i = I[-1]
+        pick.append(i)
+
+        xx1 = np.maximum(x1[i], x1[I[: last - 1]])
+        yy1 = np.maximum(y1[i], y1[I[: last - 1]])
+        zz1 = np.maximum(z1[i], z1[I[: last - 1]])
+        xx2 = np.minimum(x2[i], x2[I[: last - 1]])
+        yy2 = np.minimum(y2[i], y2[I[: last - 1]])
+        zz2 = np.minimum(z2[i], z2[I[: last - 1]])
+        cls1 = cls[i]
+        cls2 = cls[I[: last - 1]]
+
+        l = np.maximum(0, xx2 - xx1)
+        w = np.maximum(0, yy2 - yy1)
+        h = np.maximum(0, zz2 - zz1)
+
+        if old_type:
+            o = (l * w * h) / area[I[: last - 1]]
+        else:
+            inter = l * w * h
+            o = inter / (area[i] + area[I[: last - 1]] - inter)
+
+        o = o * (should_do_nms(cls1, cls2, num_base_cls))
+
+        I = np.delete(
+            I, np.concatenate(([last - 1], np.where(o > overlap_threshold)[0]))
+        )
+
+    return pick

@@ -1,5 +1,8 @@
 # 3DETR: An End-to-End Transformer Model for 3D Object Detection
 
+datasets/scannet_Pseudo_2_source_EMA_v2.py CLS_NMS works in this dataset class.
+datasets/scannet_Pseudo_2_source_EMA.py NMS is not applied when the threshold > 0.999.
+
 PyTorch implementation and models for **3DETR**.
 
 **3DETR** (**3D** **DE**tection **TR**ansformer) is a simpler alternative to complex hand-crafted 3D detection pipelines.

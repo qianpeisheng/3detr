@@ -12,8 +12,8 @@ from torch.multiprocessing import set_start_method
 from torch.utils.data import DataLoader, DistributedSampler
 
 # 3DETR codebase specific imports
-from datasets import build_dataset_Pseudo_EMA  # build_dataset_SDCoT
-from engine_distill_ema import train_one_epoch, evaluate_incremental
+from datasets import build_dataset_Pseudo_2_source_EMA_v2  # build_dataset_SDCoT
+from engine_distill_ema_2_source import evaluate, train_one_epoch, evaluate_incremental
 from models import build_model
 from optimizer import build_optimizer
 from criterion_distill_ema import build_criterion
@@ -137,6 +137,7 @@ def make_args_parser():
                         help='use distillation loss with given weight')
     parser.add_argument('--distillation_ramp_len', type=int,
                         default=100, help='length of the stabilization loss ramp-up')
+    # EMA specific args
 
     parser.add_argument('--loss_center_consistency_weight', type=float, default=0.1,
                         help='use consistency loss with given weight')
@@ -148,7 +149,12 @@ def make_args_parser():
                         default=0.999, help='ema variable decay rate')
     parser.add_argument('--consistency_ramp_len', type=int,
                         default=100, help='length of the consistency loss ramp-up')
-    # EMA specific args
+
+    # ema pseudo labels
+    parser.add_argument("--use_ema_pseudo_label",
+                        default=False, action="store_true")
+    parser.add_argument("--ema_nms_threshold", type=float,
+                        default=0.5, help="nms threshold for ema pseudo labels")
 
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
@@ -242,7 +248,8 @@ def do_train(
         )
 
         metrics = aps.compute_metrics()
-        metric_str = aps.metrics_to_str(metrics, per_class=False) # not using per class to save space
+        # not using per class to save space
+        metric_str = aps.metrics_to_str(metrics, per_class=False)
         metrics_dict = aps.metrics_to_dict(metrics)
         curr_iter = epoch * len(dataloaders["train"])
         if is_primary():
@@ -357,7 +364,7 @@ def do_train(
                 filename = "checkpoint_best.pth"
                 save_checkpoint(
                     args.checkpoint_dir,
-                    ema_model,
+                    model_no_ddp,
                     optimizer,
                     epoch,
                     args,
@@ -415,6 +422,7 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
         sys.exit(1)
 
     sd = torch.load(args.test_ckpt, map_location=torch.device("cpu"))
+
     # we already loaded the base detection model weights to the model partially
     if args.test_only:
         model_no_ddp.load_state_dict(sd["model"])
@@ -422,7 +430,7 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
     criterion_val = None  # do not compute loss for speed-up; Comment out to see test loss
     epoch = -1
     curr_iter = 0
-    ap_calculator = evaluate_incremental(
+    ap_calculator = evaluate(
         args,
         epoch,
         model,
@@ -457,36 +465,31 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
 
 
 def main(local_rank, args):
-    # if args.ngpus > 1:
-    #     print(
-    #         "Initializing Distributed Training. This is in BETA mode and hasn't been tested thoroughly. Use at your own risk :)"
-    #     )
-    #     print("To get the maximum speed-up consider reducing evaluations on val set by setting --eval_every_epoch to greater than 50")
-    #     init_distributed(
-    #         local_rank,
-    #         global_rank=local_rank,
-    #         world_size=args.ngpus,
-    #         dist_url=args.dist_url,
-    #         dist_backend="nccl",
-    #     )
+    if args.ngpus > 1:
+        print(
+            "Initializing Distributed Training. This is in BETA mode and hasn't been tested thoroughly. Use at your own risk :)"
+        )
+        print("To get the maximum speed-up consider reducing evaluations on val set by setting --eval_every_epoch to greater than 50")
+        init_distributed(
+            local_rank,
+            global_rank=local_rank,
+            world_size=args.ngpus,
+            dist_url=args.dist_url,
+            dist_backend="nccl",
+        )
 
     print(f"Called with args: {args}")
     torch.cuda.set_device(local_rank)
-    # np.random.seed(args.seed + get_rank())
-    # torch.manual_seed(args.seed + get_rank())
-    # if torch.cuda.is_available():
-    #     torch.cuda.manual_seed_all(args.seed + get_rank())
-
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    np.random.seed(args.seed + get_rank())
+    torch.manual_seed(args.seed + get_rank())
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+        torch.cuda.manual_seed_all(args.seed + get_rank())
 
     # For incremental learning, the train and test dataset are different,
     # The train dataset only contains NOVEL classes.
     # The test dataset contains both base and novel classes.
 
-    datasets, dataset_config_train, dataset_config_val, dataset_config_base = build_dataset_Pseudo_EMA(
+    datasets, dataset_config_train, dataset_config_val, dataset_config_base = build_dataset_Pseudo_2_source_EMA_v2(
         args)
 
     # define the base detection model and load weights
@@ -556,17 +559,20 @@ def main(local_rank, args):
         model = load_except_classifier(model, base_detection_model)
     # model.load_state_dict(base_detection_model.state_dict(), strict=False)
 
-    # if is_distributed():
-    #     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    #     model = torch.nn.parallel.DistributedDataParallel(
-    #         model, device_ids=[local_rank]
-    #     )
+    if is_distributed():
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[local_rank]
+        )
 
     # create an ema model
     ema_model = copy.deepcopy(model)
     ema_model.cuda(local_rank)
     for param in ema_model.parameters():
         param.detach_()
+
+    # train dataset set the ema detector
+    datasets['train'].set_ema_detector(ema_model)
 
     criterion_train = build_criterion(args, dataset_config_train)
     criterion_train = criterion_train.cuda(local_rank)
@@ -642,12 +648,12 @@ def main(local_rank, args):
         )
 
 
-# def launch_distributed(args):
-    # world_size = args.ngpus
-    # if world_size == 1:
-    #     main(local_rank=0, args=args)
-    # else:
-    #     torch.multiprocessing.spawn(main, nprocs=world_size, args=(args,))
+def launch_distributed(args):
+    world_size = args.ngpus
+    if world_size == 1:
+        main(local_rank=0, args=args)
+    else:
+        torch.multiprocessing.spawn(main, nprocs=world_size, args=(args,))
 
 
 if __name__ == "__main__":
@@ -657,6 +663,4 @@ if __name__ == "__main__":
         set_start_method("spawn")
     except RuntimeError:
         pass
-    main(local_rank=0, args=args)
-
-    # launch_distributed(args)
+    launch_distributed(args)

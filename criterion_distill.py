@@ -482,7 +482,9 @@ class SetCriterion(nn.Module):
         if "aux_outputs" in outputs:
             for k in range(len(outputs["aux_outputs"])):
                 interm_loss, interm_loss_dict = self.single_output_forward(
-                    outputs["aux_outputs"][k], targets, outputs_static['aux_outputs'][k]
+                    # outputs["aux_outputs"][k], targets, outputs_static['aux_outputs'][k]
+                    outputs["aux_outputs"][k], targets, None # not calculating distillation loss for aux outputs
+
                 )
 
                 loss += interm_loss

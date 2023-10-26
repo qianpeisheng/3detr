@@ -6,10 +6,10 @@ import torch.distributed as dist
 
 
 def is_distributed():
-    if not dist.is_available() or not dist.is_initialized():
-        return False
-    return True
-
+    # if not dist.is_available() or not dist.is_initialized():
+    #     return False
+    # return True
+    return False
 
 def get_rank():
     if not is_distributed():

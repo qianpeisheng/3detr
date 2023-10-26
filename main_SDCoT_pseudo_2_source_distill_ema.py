@@ -462,25 +462,25 @@ def test_model(args, model, model_no_ddp, criterion_val, dataset_config_val, dat
 
 
 def main(local_rank, args):
-    if args.ngpus > 1:
-        print(
-            "Initializing Distributed Training. This is in BETA mode and hasn't been tested thoroughly. Use at your own risk :)"
-        )
-        print("To get the maximum speed-up consider reducing evaluations on val set by setting --eval_every_epoch to greater than 50")
-        init_distributed(
-            local_rank,
-            global_rank=local_rank,
-            world_size=args.ngpus,
-            dist_url=args.dist_url,
-            dist_backend="nccl",
-        )
+    # if args.ngpus > 1:
+    #     print(
+    #         "Initializing Distributed Training. This is in BETA mode and hasn't been tested thoroughly. Use at your own risk :)"
+    #     )
+    #     print("To get the maximum speed-up consider reducing evaluations on val set by setting --eval_every_epoch to greater than 50")
+    #     init_distributed(
+    #         local_rank,
+    #         global_rank=local_rank,
+    #         world_size=args.ngpus,
+    #         dist_url=args.dist_url,
+    #         dist_backend="nccl",
+    #     )
 
     print(f"Called with args: {args}")
     torch.cuda.set_device(local_rank)
-    np.random.seed(args.seed + get_rank())
-    torch.manual_seed(args.seed + get_rank())
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed + get_rank())
+        torch.cuda.manual_seed_all(args.seed)
 
     # For incremental learning, the train and test dataset are different,
     # The train dataset only contains NOVEL classes.
@@ -556,11 +556,11 @@ def main(local_rank, args):
         model = load_except_classifier(model, base_detection_model)
     # model.load_state_dict(base_detection_model.state_dict(), strict=False)
 
-    if is_distributed():
-        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[local_rank]
-        )
+    # if is_distributed():
+    #     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    #     model = torch.nn.parallel.DistributedDataParallel(
+    #         model, device_ids=[local_rank]
+    #     )
 
     # create an ema model
     ema_model = copy.deepcopy(model)
@@ -587,7 +587,8 @@ def main(local_rank, args):
             shuffle = True
         else:
             shuffle = False
-        if is_distributed():
+        # if is_distributed():
+        if False:
             sampler = DistributedSampler(datasets[split], shuffle=shuffle)
         elif shuffle:
             sampler = torch.utils.data.RandomSampler(datasets[split])
@@ -645,12 +646,12 @@ def main(local_rank, args):
         )
 
 
-def launch_distributed(args):
-    world_size = args.ngpus
-    if world_size == 1:
-        main(local_rank=0, args=args)
-    else:
-        torch.multiprocessing.spawn(main, nprocs=world_size, args=(args,))
+# def launch_distributed(args):
+#     world_size = args.ngpus
+#     if world_size == 1:
+#         main(local_rank=0, args=args)
+#     else:
+#         torch.multiprocessing.spawn(main, nprocs=world_size, args=(args,))
 
 
 if __name__ == "__main__":
@@ -660,4 +661,6 @@ if __name__ == "__main__":
         set_start_method("spawn")
     except RuntimeError:
         pass
-    launch_distributed(args)
+    main(local_rank=0, args=args)
+
+    # launch_distributed(args)

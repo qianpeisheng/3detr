@@ -162,18 +162,23 @@ def nms_3d_faster_samecls(boxes, overlap_threshold, old_type=False):
     return pick
 
 def should_do_nms(cls1, cls2, num_base_cls):
-    if (cls1 - num_base_cls) * (cls2 - num_base_cls) < 0:
-        # one of them is base class, the other is novel class.
-        return True
-    else:
-        # both of them are base class or novel class.
-        return False
+    # cls1 is an np.float64, cls2 is an np.array of shape (n,)
+    # num_base_cls is an int
+
+    return (cls1 - num_base_cls) * (cls2 - num_base_cls) < 0
+    # if (cls1 - num_base_cls) * (cls2 - num_base_cls) < 0:
+    #     # one of them is base class, the other is novel class.
+    #     return True
+    # else:
+    #     # both of them are base class or novel class.
+    #     return False
 
 def nms_3d_faster_base_novel(boxes, overlap_threshold, num_base_cls, old_type=False):
     '''
     Remove base class boxes if they overlap with novel class boxes.
     Because during incremental learning, the base class boxes are pseudo labeled.
     '''
+
     x1 = boxes[:, 0]
     y1 = boxes[:, 1]
     z1 = boxes[:, 2]

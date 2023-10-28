@@ -26,15 +26,17 @@ from utils.random_cuboid import RandomCuboid
 
 IGNORE_LABEL = -100
 MEAN_COLOR_RGB = np.array([109.8, 97.2, 83.8])
-DATASET_ROOT_DIR = "scannet_data/scannet_all"  ## Replace with path to dataset
-DATASET_METADATA_DIR = "scannet_data/scannet/meta_data" ## Replace with path to dataset
+DATASET_ROOT_DIR = "scannet_data/scannet_all"  # Replace with path to dataset
+# Replace with path to dataset
+DATASET_METADATA_DIR = "scannet_data/scannet/meta_data"
 # In this dataset, all scans are saved in the same folder.
 
-NUM_CLASS = 9 # depending on the base training classes.
+NUM_CLASS = 9  # depending on the base training classes.
+
 
 class ScannetDatasetConfig_base(object):
     def __init__(self, num_base_class=NUM_CLASS):
-        self.num_semcls = num_base_class # 18 means all classes
+        self.num_semcls = num_base_class  # 18 means all classes
         self.num_angle_bin = 1
         self.max_num_obj = 64
 
@@ -48,7 +50,7 @@ class ScannetDatasetConfig_base(object):
             "curtain": 6,
             "desk": 7,
             "door": 8,
-            "garbagebin": 9, # otherfurniture in SDCoT
+            "garbagebin": 9,  # otherfurniture in SDCoT
             "picture": 10,
             "refrigerator": 11,
             "showercurtrain": 12,
@@ -92,7 +94,8 @@ class ScannetDatasetConfig_base(object):
         self.class2type = {self.type2class[t]: t for t in self.type2class}
         self.nyu40ids = np.array(
             # [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39] # 3detr original order
-            np.array([36, 4, 10, 3, 5, 12, 16, 14, 8, 39, 11, 24, 28, 34, 6, 7, 33, 9]) # SDCoT order
+            np.array([36, 4, 10, 3, 5, 12, 16, 14, 8, 39, 11,
+                     24, 28, 34, 6, 7, 33, 9])  # SDCoT order
         )
 
         # select only self.num_semcls classes
@@ -240,7 +243,8 @@ class ScannetDetectionDataset_base(Dataset):
         if split_set == "all":
             self.scan_names = all_scan_names
         elif split_set in ["train", "val", "test"]:
-            split_filenames = os.path.join(meta_data_dir, f"scannetv2_{split_set}.txt")
+            split_filenames = os.path.join(
+                meta_data_dir, f"scannetv2_{split_set}.txt")
             with open(split_filenames, "r") as f:
                 self.scan_names = f.read().splitlines()
             # remove unavailiable scans
@@ -257,7 +261,8 @@ class ScannetDetectionDataset_base(Dataset):
         self.use_height = use_height
         self.augment = augment
         self.use_random_cuboid = use_random_cuboid
-        self.random_cuboid_augmentor = RandomCuboid(min_points=random_cuboid_min_points)
+        self.random_cuboid_augmentor = RandomCuboid(
+            min_points=random_cuboid_min_points)
         self.center_normalizing_range = [
             np.zeros((1, 3), dtype=np.float32),
             np.ones((1, 3), dtype=np.float32),
@@ -268,14 +273,10 @@ class ScannetDetectionDataset_base(Dataset):
 
     def __getitem__(self, idx):
         scan_name = self.scan_names[idx]
-        mesh_vertices = np.load(os.path.join(self.data_path, scan_name) + "_vert.npy")
-        instance_labels = np.load(
-            os.path.join(self.data_path, scan_name) + "_ins_label.npy"
-        )
-        semantic_labels = np.load(
-            os.path.join(self.data_path, scan_name) + "_sem_label.npy"
-        )
-        instance_bboxes = np.load(os.path.join(self.data_path, scan_name) + "_bbox.npy")
+        mesh_vertices = np.load(os.path.join(
+            self.data_path, scan_name) + "_vert.npy")
+        instance_bboxes = np.load(os.path.join(
+            self.data_path, scan_name) + "_bbox.npy")
 
         # Filter instance_bboxes and keep only those with classes that are in the dataset_config
         instance_bboxes = instance_bboxes[
@@ -293,7 +294,8 @@ class ScannetDetectionDataset_base(Dataset):
         if self.use_height:
             floor_height = np.percentile(point_cloud[:, 2], 0.99)
             height = point_cloud[:, 2] - floor_height
-            point_cloud = np.concatenate([point_cloud, np.expand_dims(height, 1)], 1)
+            point_cloud = np.concatenate(
+                [point_cloud, np.expand_dims(height, 1)], 1)
 
         # ------------------------------- LABELS ------------------------------
         MAX_NUM_OBJ = self.dataset_config.max_num_obj
@@ -310,30 +312,17 @@ class ScannetDetectionDataset_base(Dataset):
                 instance_bboxes,
                 per_point_labels,
             ) = self.random_cuboid_augmentor(
-                point_cloud, instance_bboxes, [instance_labels, semantic_labels]
+                point_cloud, instance_bboxes
             )
-            instance_labels = per_point_labels[0]
-            semantic_labels = per_point_labels[1]
 
         point_cloud, choices = pc_util.random_sampling(
             point_cloud, self.num_points, return_choices=True
         )
-        instance_labels = instance_labels[choices]
-        semantic_labels = semantic_labels[choices]
-
-        # uncomment to use semantic labels
-
-        # sem_seg_labels = np.ones_like(semantic_labels) * IGNORE_LABEL
-
-        # for _c in self.dataset_config.nyu40ids_semseg:
-        #     sem_seg_labels[
-        #         semantic_labels == _c
-        #     ] = self.dataset_config.nyu40id2class_semseg[_c]
 
         pcl_color = pcl_color[choices]
 
-        target_bboxes_mask[0 : instance_bboxes.shape[0]] = 1
-        target_bboxes[0 : instance_bboxes.shape[0], :] = instance_bboxes[:, 0:6]
+        target_bboxes_mask[0: instance_bboxes.shape[0]] = 1
+        target_bboxes[0: instance_bboxes.shape[0], :] = instance_bboxes[:, 0:6]
 
         # ------------------------------- DATA AUGMENTATION ------------------------------
         if self.augment:
@@ -349,9 +338,11 @@ class ScannetDetectionDataset_base(Dataset):
                 target_bboxes[:, 1] = -1 * target_bboxes[:, 1]
 
             # Rotation along up-axis/Z-axis
-            rot_angle = (np.random.random() * np.pi / 18) - np.pi / 36  # -5 ~ +5 degree
+            rot_angle = (np.random.random() * np.pi / 18) - \
+                np.pi / 36  # -5 ~ +5 degree
             rot_mat = pc_util.rotz(rot_angle)
-            point_cloud[:, 0:3] = np.dot(point_cloud[:, 0:3], np.transpose(rot_mat))
+            point_cloud[:, 0:3] = np.dot(
+                point_cloud[:, 0:3], np.transpose(rot_mat))
             target_bboxes = self.dataset_config.rotate_aligned_boxes(
                 target_bboxes, rot_mat
             )
@@ -370,7 +361,8 @@ class ScannetDetectionDataset_base(Dataset):
             dst_range=self.center_normalizing_range,
         )
         box_centers_normalized = box_centers_normalized.squeeze(0)
-        box_centers_normalized = box_centers_normalized * target_bboxes_mask[..., None]
+        box_centers_normalized = box_centers_normalized * \
+            target_bboxes_mask[..., None]
         mult_factor = point_cloud_dims_max - point_cloud_dims_min
         box_sizes_normalized = scale_points(
             raw_sizes.astype(np.float32)[None, ...],
@@ -395,17 +387,20 @@ class ScannetDetectionDataset_base(Dataset):
         ret_dict["gt_angle_class_label"] = angle_classes.astype(np.int64)
         ret_dict["gt_angle_residual_label"] = angle_residuals.astype(np.float32)
         target_bboxes_semcls = np.zeros((MAX_NUM_OBJ))
-        target_bboxes_semcls[0 : instance_bboxes.shape[0]] = [
+        target_bboxes_semcls[0: instance_bboxes.shape[0]] = [
             self.dataset_config.nyu40id2class[int(x)]
-            for x in instance_bboxes[:, -1][0 : instance_bboxes.shape[0]]
+            for x in instance_bboxes[:, -1][0: instance_bboxes.shape[0]]
         ]
         ret_dict["gt_box_sem_cls_label"] = target_bboxes_semcls.astype(np.int64)
         ret_dict["gt_box_present"] = target_bboxes_mask.astype(np.float32)
         ret_dict["scan_idx"] = np.array(idx).astype(np.int64)
         ret_dict["pcl_color"] = pcl_color
         ret_dict["gt_box_sizes"] = raw_sizes.astype(np.float32)
-        ret_dict["gt_box_sizes_normalized"] = box_sizes_normalized.astype(np.float32)
+        ret_dict["gt_box_sizes_normalized"] = box_sizes_normalized.astype(
+            np.float32)
         ret_dict["gt_box_angles"] = raw_angles.astype(np.float32)
-        ret_dict["point_cloud_dims_min"] = point_cloud_dims_min.astype(np.float32)
-        ret_dict["point_cloud_dims_max"] = point_cloud_dims_max.astype(np.float32)
+        ret_dict["point_cloud_dims_min"] = point_cloud_dims_min.astype(
+            np.float32)
+        ret_dict["point_cloud_dims_max"] = point_cloud_dims_max.astype(
+            np.float32)
         return ret_dict

@@ -574,7 +574,7 @@ class SetCriterion(nn.Module):
             size_loss = torch.zeros(1, device=pred_box_sizes.device).squeeze()
         return {"loss_size": size_loss}
 
-    def single_output_forward(self, outputs, ema_outputs, targets, outputs_static=None):
+    def single_output_forward(self, outputs, ema_outputs, targets, outputs_static=None, is_last=True):
         gious = generalized_box3d_iou(
             outputs["box_corners"],
             targets["gt_box_corners"],
@@ -589,77 +589,77 @@ class SetCriterion(nn.Module):
         )
         outputs["center_dist"] = center_dist
         assignments = self.matcher(outputs, targets)
+        if is_last:
+            # revert augmentation for ema_outputs
+            flip_x_axis = outputs["flip_x_axis"]
+            flip_y_axis = outputs["flip_y_axis"]
+            rot_mat = outputs["rot_mat"]
+            rot_mat_transposed = rot_mat.transpose(1, 2)
+            inds_to_flip_x_axis = torch.nonzero(flip_x_axis).squeeze(1)
+            inds_to_flip_y_axis = torch.nonzero(flip_y_axis).squeeze(1)
 
-        # revert augmentation for ema_outputs
-        flip_x_axis = outputs["flip_x_axis"]
-        flip_y_axis = outputs["flip_y_axis"]
-        rot_mat = outputs["rot_mat"]
-        rot_mat_transposed = rot_mat.transpose(1, 2)
-        inds_to_flip_x_axis = torch.nonzero(flip_x_axis).squeeze(1)
-        inds_to_flip_y_axis = torch.nonzero(flip_y_axis).squeeze(1)
+            # ema_outputs shape is (batch, nprop, 3)
+            ema_outputs["center_normalized"][inds_to_flip_x_axis, :, 0] = - \
+                ema_outputs["center_normalized"][inds_to_flip_x_axis, :, 0]
+            ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1] = - \
+                ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1]
+            ema_outputs["center_normalized"] = torch.bmm(
+                ema_outputs["center_normalized"], rot_mat_transposed)
 
-        # ema_outputs shape is (batch, nprop, 3)
-        ema_outputs["center_normalized"][inds_to_flip_x_axis, :, 0] = - \
-            ema_outputs["center_normalized"][inds_to_flip_x_axis, :, 0]
-        ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1] = - \
-            ema_outputs["center_normalized"][inds_to_flip_y_axis, :, 1]
-        ema_outputs["center_normalized"] = torch.bmm(
-            ema_outputs["center_normalized"], rot_mat_transposed)
+            # repeat for center_unnormalized
+            ema_outputs["center_unnormalized"][inds_to_flip_x_axis, :, 0] = - \
+                ema_outputs["center_unnormalized"][inds_to_flip_x_axis, :, 0]
+            ema_outputs["center_unnormalized"][inds_to_flip_y_axis, :, 1] = - \
+                ema_outputs["center_unnormalized"][inds_to_flip_y_axis, :, 1]
+            ema_outputs["center_unnormalized"] = torch.bmm(
+                ema_outputs["center_unnormalized"], rot_mat_transposed)
 
-        # repeat for center_unnormalized
-        ema_outputs["center_unnormalized"][inds_to_flip_x_axis, :, 0] = - \
-            ema_outputs["center_unnormalized"][inds_to_flip_x_axis, :, 0]
-        ema_outputs["center_unnormalized"][inds_to_flip_y_axis, :, 1] = - \
-            ema_outputs["center_unnormalized"][inds_to_flip_y_axis, :, 1]
-        ema_outputs["center_unnormalized"] = torch.bmm(
-            ema_outputs["center_unnormalized"], rot_mat_transposed)
+            # box_corners_copy = ema_outputs["box_corners"].clone().detach() # for debugging
+            # also update the box corners
+            # ema_outputs["box_corners"] shape is (batch, nprop, 8, 3)
+            ema_outputs["box_corners"][inds_to_flip_x_axis, :, :, 0] = - \
+                ema_outputs["box_corners"][inds_to_flip_x_axis, :, :, 0]
+            ema_outputs["box_corners"][inds_to_flip_y_axis, :, :, 1] = - \
+                ema_outputs["box_corners"][inds_to_flip_y_axis, :, :, 1]
 
-        # box_corners_copy = ema_outputs["box_corners"].clone().detach() # for debugging
-        # also update the box corners
-        # ema_outputs["box_corners"] shape is (batch, nprop, 8, 3)
-        ema_outputs["box_corners"][inds_to_flip_x_axis, :, :, 0] = - \
-            ema_outputs["box_corners"][inds_to_flip_x_axis, :, :, 0]
-        ema_outputs["box_corners"][inds_to_flip_y_axis, :, :, 1] = - \
-            ema_outputs["box_corners"][inds_to_flip_y_axis, :, :, 1]
+            # Expand dimensions of rot_mat
+            rot_mat_transposed_expanded = rot_mat_transposed.unsqueeze(
+                1)  # Adds a new dimension after the first dimension
 
-        # Expand dimensions of rot_mat
-        rot_mat_transposed_expanded = rot_mat_transposed.unsqueeze(
-            1)  # Adds a new dimension after the first dimension
+            # Perform batch matrix multiplication
+            ema_outputs["box_corners"] = torch.matmul(
+                ema_outputs["box_corners"], rot_mat_transposed_expanded)  # shape: (batch, nprop, 8, 3)
 
-        # Perform batch matrix multiplication
-        ema_outputs["box_corners"] = torch.matmul(
-            ema_outputs["box_corners"], rot_mat_transposed_expanded)  # shape: (batch, nprop, 8, 3)
+            # ema_outputs["box_corners"] = torch.bmm(
+            #     ema_outputs["box_corners"], rot_mat.transpose(1, 2))
 
-        # ema_outputs["box_corners"] = torch.bmm(
-        #     ema_outputs["box_corners"], rot_mat.transpose(1, 2))
+            # for debugging
+            # process the box_corners_copy and compare with ema_outputs["box_corners"]
+            # box_center_upright = flip_axis_to_camera_tensor(ema_outputs['center_unnormalized'])
+            # box_corners_copy_2 = get_3d_box_batch_tensor(
+            #     ema_outputs["size_unnormalized"], ema_outputs["angle_continuous"], box_center_upright
+            # )
 
-        # for debugging
-        # process the box_corners_copy and compare with ema_outputs["box_corners"]
-        # box_center_upright = flip_axis_to_camera_tensor(ema_outputs['center_unnormalized'])
-        # box_corners_copy_2 = get_3d_box_batch_tensor(
-        #     ema_outputs["size_unnormalized"], ema_outputs["angle_continuous"], box_center_upright
-        # )
+            # calculate ema gious
+            ema_gious = generalized_box3d_iou(
+                ema_outputs["box_corners"],
+                targets["gt_box_corners"],
+                targets["nactual_gt"],
+                rotated_boxes=torch.any(targets["gt_box_angles"] > 0).item(),
+                # needs_grad=(self.loss_weight_dict["loss_giou_weight"] > 0),
+                # do not need grad for ema gious
+                needs_grad=False,
+            )
+            ema_outputs["gious"] = ema_gious
 
-        # calculate ema gious
-        ema_gious = generalized_box3d_iou(
-            ema_outputs["box_corners"],
-            targets["gt_box_corners"],
-            targets["nactual_gt"],
-            rotated_boxes=torch.any(targets["gt_box_angles"] > 0).item(),
-            # needs_grad=(self.loss_weight_dict["loss_giou_weight"] > 0),
-            # do not need grad for ema gious
-            needs_grad=False,
-        )
-        ema_outputs["gious"] = ema_gious
+            # calculate ema center dist
+            ema_center_dist = torch.cdist(
+                ema_outputs["center_normalized"], targets["gt_box_centers_normalized"], p=1
+            )
+            ema_outputs["center_dist"] = ema_center_dist
 
-        # calculate ema center dist
-        ema_center_dist = torch.cdist(
-            ema_outputs["center_normalized"], targets["gt_box_centers_normalized"], p=1
-        )
-        ema_outputs["center_dist"] = ema_center_dist
-
-        # assignments for ema
-        ema_assignments = self.matcher(ema_outputs, targets)
+            # assignments for ema
+            ema_assignments = self.matcher(ema_outputs, targets)
 
         losses = {}
 
@@ -669,16 +669,16 @@ class SetCriterion(nn.Module):
                 loss_wt_key in self.loss_weight_dict
                 and self.loss_weight_dict[loss_wt_key] > 0
             ) or loss_wt_key not in self.loss_weight_dict:
-                if 'center_consistency' in k:
+                if 'center_consistency' in k and is_last:
                     curr_loss, indices, masked_dist2 = self.loss_functions[k](
                         outputs, ema_outputs)
-                elif 'cls_consistency' in k or 'size_consistency' in k:
+                elif 'cls_consistency' in k or 'size_consistency' in k and is_last:
                     curr_loss = self.loss_functions[k](
                         outputs, ema_outputs, indices, masked_dist2)
                 # only compute losses with loss_wt > 0
                 # certain losses like cardinality are only logged and have no loss weight
                 # use static outputs for distillation loss
-                elif k == "loss_distill":
+                elif k == "loss_distill" and is_last:
                     if outputs_static is None:
                         # during evaluation outputs_static is None, and there is no distillation loss.
                         # curr_loss = torch.zeros(1, device='cuda:0') # dummy loss TODO: does not work with multi-gpu
@@ -701,10 +701,10 @@ class SetCriterion(nn.Module):
             if self.loss_weight_dict[k] > 0 and loss_name in losses:
                 losses[loss_name] *= self.loss_weight_dict[k]
                 # further adjust the consistency loss by a scale factor
-                if 'consistency' in loss_name:
+                if 'consistency' in loss_name and is_last:
                     losses[loss_name] *= self.consistency_weight_scale
                 # scale distillation loss
-                elif "distill" in loss_name:
+                elif "distill" in loss_name and is_last:
                     losses[loss_name] *= self.distill_weight_scale
                 final_loss += losses[loss_name]
         return final_loss, losses
@@ -727,20 +727,21 @@ class SetCriterion(nn.Module):
 
         loss, loss_dict = self.single_output_forward(outputs=outputs["outputs"],
                                                      ema_outputs=ema_outputs['outputs'], targets=targets,
-                                                     outputs_static=outputs_static['outputs'])
-
+                                                     outputs_static=outputs_static['outputs'], is_last=True)
+        
+        # not using aux_outputs for distillation loss and consistency loss
         # also needs to distill and scale this.
         if "aux_outputs" in outputs:
             for k in range(len(outputs["aux_outputs"])):
 
-                # update aux_outputs with the same augmentations as outputs
-                outputs["aux_outputs"][k]["flip_x_axis"] = outputs["outputs"]["flip_x_axis"]
-                outputs["aux_outputs"][k]["flip_y_axis"] = outputs["outputs"]["flip_y_axis"]
-                outputs["aux_outputs"][k]["rot_mat"] = outputs["outputs"]["rot_mat"]
+                # # update aux_outputs with the same augmentations as outputs
+                # outputs["aux_outputs"][k]["flip_x_axis"] = outputs["outputs"]["flip_x_axis"]
+                # outputs["aux_outputs"][k]["flip_y_axis"] = outputs["outputs"]["flip_y_axis"]
+                # outputs["aux_outputs"][k]["rot_mat"] = outputs["outputs"]["rot_mat"]
 
                 interm_loss, interm_loss_dict = self.single_output_forward(
                     outputs=outputs["aux_outputs"][k], ema_outputs=ema_outputs["aux_outputs"][
-                        k], targets=targets, outputs_static=outputs_static['aux_outputs'][k]
+                        k], targets=targets, outputs_static=outputs_static['aux_outputs'][k], is_last=False
                 )
 
                 loss += interm_loss

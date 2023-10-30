@@ -138,6 +138,7 @@ def make_args_parser():
     parser.add_argument('--distillation_ramp_len', type=int,
                         default=100, help='length of the stabilization loss ramp-up')
 
+    # EMA specific args
     parser.add_argument('--loss_center_consistency_weight', type=float, default=0.1,
                         help='use consistency loss with given weight')
     parser.add_argument('--loss_cls_consistency_weight', type=float, default=10.0,
@@ -148,7 +149,9 @@ def make_args_parser():
                         default=0.999, help='ema variable decay rate')
     parser.add_argument('--consistency_ramp_len', type=int,
                         default=100, help='length of the consistency loss ramp-up')
-    # EMA specific args
+    
+    # Pseudo label specific args
+    parser.add_argument("--use_cls_threshold", default=False, action="store_true", help='use cls specific threshold to filter out low confidence predictions')
 
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)

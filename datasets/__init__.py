@@ -181,7 +181,8 @@ def build_dataset_Pseudo_EMA(args):
             root_dir=args.dataset_root_dir,
             meta_data_dir=args.meta_data_dir,
             use_color=args.use_color,
-            augment=True
+            augment=True,
+            use_cls_threshold=args.use_cls_threshold,
         ),
         "test": dataset_builder_test(
             dataset_config_val,

@@ -27,5 +27,5 @@ CUDA_VISIBLE_DEVICES=3 python3 main_SDCoT_pseudo_2_source_distill_ema.py \
 --loss_size_consistency_weight 10. \
 --use_ema_pseudo_label \
 --ema_nms_threshold 0.5 \
---checkpoint_dir ckpts_scannet/2_source_scannet_SDCoT_9_9_no_nms_filter_con \
+--checkpoint_dir ckpts_scannet/rerun_2_source_scannet_SDCoT_9_9_no_nms_filter_con \
 --checkpoint_name checkpoint_best_6480.pth

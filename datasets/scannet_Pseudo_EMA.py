@@ -227,8 +227,10 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
         augment=False,  # True for training, False for testing
         use_random_cuboid=True,
         random_cuboid_min_points=30000,
+        use_cls_threshold=True,
     ):
 
+        self.use_cls_threshold = use_cls_threshold
         self.dataset_config = dataset_config
         assert split_set in ["train", "val"]
         if root_dir is None:
@@ -290,7 +292,7 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
         self.ema_detector = ema_detector
 
     # Use the base detector to generate pseudo labels.
-    def generate_pseudo_labels(self, point_clouds, mins, maxes, model):
+    def generate_pseudo_labels(self, point_clouds, mins, maxes, model, use_cls_threshold=True):
         '''
             inputs = {
             "point_clouds": batch_data_label["point_clouds"],
@@ -327,6 +329,7 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
                 objectness_probs=outputs['outputs']['objectness_prob'],
                 point_cloud=batch_data_label["point_clouds"],
                 config_dict=self.ap_config_dict,
+                use_cls_threshold=use_cls_threshold,
             )
 
         # convert to __getitem__ output format
@@ -430,7 +433,8 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
             point_cloud,
             point_cloud.min(axis=0)[:3],
             point_cloud.max(axis=0)[:3],
-            self.base_detector
+            self.base_detector,
+            self.use_cls_threshold
         )
 
         # if use_ema_pseudo_label, get pseudo labels from ema detector and append to pseudo_labels

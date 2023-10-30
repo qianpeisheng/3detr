@@ -25,5 +25,5 @@ CUDA_VISIBLE_DEVICES=2 python3 main_SDCoT_pseudo_distill_ema.py \
 --loss_center_consistency_weight 1. \
 --loss_cls_consistency_weight 0.1 \
 --loss_size_consistency_weight 10. \
---checkpoint_dir ckpts_scannet/debug_5_aux_scannet_SDCoT_9_9_pseudo_distill_ema_masked_0_1_filter_con \
+--checkpoint_dir ckpts_scannet/rerun_debug_5_aux_scannet_SDCoT_9_9_pseudo_distill_ema_masked_0_1_filter_con \
 --checkpoint_name checkpoint_best_6480.pth

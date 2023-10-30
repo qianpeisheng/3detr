@@ -19,6 +19,15 @@ from utils.box_util import (extract_pc_in_box3d, flip_axis_to_camera_np,
 from utils.eval_det import eval_det_multiprocessing, get_iou_obb
 from utils.nms import nms_2d_faster, nms_3d_faster, nms_3d_faster_samecls
 
+SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = [0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21]
+SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = [0.93, 0.95, 0.84, 0.8, 0.73, 0.75, 0.7, 0.82, 0.22, 0.69, 0.85, 0.68, 0.85, 0.85]
+SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = [0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21] # TODO update this
+
+SCANNET_BASE_PSEUDO_THRESHOLDS = {
+    9: SCANNET_9_9_BASE_PSEUDO_THRESHOLDS,
+    14: SCANNET_14_4_BASE_PSEUDO_THRESHOLDS,
+    17: SCANNET_17_1_BASE_PSEUDO_THRESHOLDS,
+}
 
 def flip_axis_to_depth(pc):
     pc2 = np.copy(pc)
@@ -241,7 +250,7 @@ def parse_predictions(
 # use base classes only because
 # the base detector is trained on base classes only.
 def parse_predictions_SDCoT(
-    predicted_boxes, sem_cls_probs, objectness_probs, point_cloud, config_dict
+    predicted_boxes, sem_cls_probs, objectness_probs, point_cloud, config_dict, use_cls_threshold=False
 ):
     """Parse predictions to OBB parameters and suppress overlapping boxes
 
@@ -396,22 +405,38 @@ def parse_predictions_SDCoT(
     batch_pred_map_cls = (
         []
     )  # a list (len: batch_size) of list (len: num of predictions per sample) of tuples of pred_cls, pred_box and conf (0-1)
+
+    if use_cls_threshold:
+        base_pseudo_thresholds_list = SCANNET_BASE_PSEUDO_THRESHOLDS[config_dict["dataset_config"].num_base_class]
     for i in range(bsize):
         if config_dict["per_class_proposal"]:
             assert config_dict["use_cls_confidence_only"] is False
             cur_list = []
             for ii in range(config_dict["dataset_config"].num_base_class):
-                cur_list += [
-                    (
-                        ii,
-                        pred_corners_3d_upright_camera[i, j],
-                        sem_cls_probs[i, j, ii] * obj_prob[i, j],
-                    )
-                    for j in range(pred_corners_3d_upright_camera.shape[1])
-                    if pred_mask[i, j] == 1
-                    and obj_prob[i, j] > config_dict["pseudo_objectness_conf_thresh"]
-                    and sem_cls_probs[i, j, ii] > config_dict["pseudo_class_conf_thresh"]
-                ]
+                if use_cls_threshold:
+                    cur_list += [
+                        (
+                            ii,
+                            pred_corners_3d_upright_camera[i, j],
+                            sem_cls_probs[i, j, ii] * obj_prob[i, j],
+                        )
+                        for j in range(pred_corners_3d_upright_camera.shape[1])
+                        if pred_mask[i, j] == 1
+                        and obj_prob[i, j] > base_pseudo_thresholds_list[ii]
+                        and sem_cls_probs[i, j, ii] > base_pseudo_thresholds_list[ii]
+                    ]
+                else:
+                    cur_list += [
+                        (
+                            ii,
+                            pred_corners_3d_upright_camera[i, j],
+                            sem_cls_probs[i, j, ii] * obj_prob[i, j],
+                        )
+                        for j in range(pred_corners_3d_upright_camera.shape[1])
+                        if pred_mask[i, j] == 1
+                        and obj_prob[i, j] > config_dict["pseudo_objectness_conf_thresh"]
+                        and sem_cls_probs[i, j, ii] > config_dict["pseudo_class_conf_thresh"]
+                    ]
             batch_pred_map_cls.append(cur_list)
         elif config_dict["use_cls_confidence_only"]:
             batch_pred_map_cls.append(
@@ -441,7 +466,6 @@ def parse_predictions_SDCoT(
             )
 
     return batch_pred_map_cls
-
 
 def get_ap_config_dict(
     remove_empty_box=True,

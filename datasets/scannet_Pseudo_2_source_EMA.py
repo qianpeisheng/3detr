@@ -36,6 +36,19 @@ DATASET_METADATA_DIR = "scannet_data/scannet/meta_data"
 NUM_CLASS_BASE = 9  # depending on the base training classes.
 NUM_CLASS_INCREMENTAL = 9  # depending on the incremental training classes.
 
+SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = [
+    0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21]
+SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = [
+    0.93, 0.95, 0.84, 0.8, 0.73, 0.75, 0.7, 0.82, 0.22, 0.69, 0.85, 0.68, 0.85, 0.85]
+SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = [
+    0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21]  # TODO update this
+
+SCANNET_BASE_PSEUDO_THRESHOLDS = {
+    9: SCANNET_9_9_BASE_PSEUDO_THRESHOLDS,
+    14: SCANNET_14_4_BASE_PSEUDO_THRESHOLDS,
+    17: SCANNET_17_1_BASE_PSEUDO_THRESHOLDS,
+}
+
 
 class ScannetDatasetConfig_Pseudo_2_source_EMA(object):
     def __init__(self, num_base_class=NUM_CLASS_BASE, num_novel_class=NUM_CLASS_INCREMENTAL):
@@ -229,12 +242,15 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         use_random_cuboid=True,
         random_cuboid_min_points=30000,
         use_ema_pseudo_label=False,  # whether to use ema pseudo label
-        nms_threshold=0.5
+        nms_threshold=0.5,
+        use_cls_threshold=True,
     ):
+        self.use_cls_threshold = use_cls_threshold
         self.use_ema_pseudo_label = use_ema_pseudo_label
         self.nms_threshold = nms_threshold
         if self.nms_threshold > 0.999:
-            print('Warning: No NMS is used to combine static and dynamic teacher pseudo labels.')
+            print(
+                'Warning: No NMS is used to combine static and dynamic teacher pseudo labels.')
 
         self.nms_threshold_base_novel = 0.75
 
@@ -300,7 +316,7 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
 
     # Use the base detector to generate pseudo labels.
 
-    def generate_pseudo_labels(self, point_clouds, mins, maxes, model):
+    def generate_pseudo_labels(self, point_clouds, mins, maxes, model, threshold_list=None):
         '''
             inputs = {
             "point_clouds": batch_data_label["point_clouds"],
@@ -338,6 +354,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
                 objectness_probs=outputs['outputs']['objectness_prob'],
                 point_cloud=batch_data_label["point_clouds"],
                 config_dict=self.ap_config_dict,
+                use_cls_threshold=self.use_cls_threshold,
+                threshold_list=threshold_list
             )
 
         # convert to __getitem__ output format
@@ -349,7 +367,7 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         # The second element is an array of (8, 3), which is the x,y,z coordinates of 8 corners of the bounding box.
         # The third element is the probality of the class.
 
-        # PL to BB: 0 -> 0, -1 -> 2, 2 -> 1 
+        # PL to BB: 0 -> 0, -1 -> 2, 2 -> 1
         instance_bbox = np.zeros((7, ))
         instance_bbox[0] = pseudo_label[1][:, 0].mean(axis=0)
         # swap instance_bbox[1] and instance_bbox[2], and time -1 to instance_bbox[2]
@@ -385,15 +403,15 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         pseudo_label.append(instance_box[6])
         pseudo_label.append(np.zeros((8, 3)))
         # pseudo_label[1][:, 0] is the x coordinates of the 8 corners of the bounding box. i.e., x0 and x1.
-        pseudo_label[1][:, 0] = np.array([instance_box[0] - instance_box[3] / 2, instance_box[0] + instance_box[3] / 2, instance_box[0] + instance_box[3] / 2, instance_box[0] - instance_box[3] / 2, 
-                                        instance_box[0] - instance_box[3] / 2, instance_box[0] + instance_box[3] / 2, instance_box[0] + instance_box[3] / 2, instance_box[0] - instance_box[3] / 2])
+        pseudo_label[1][:, 0] = np.array([instance_box[0] - instance_box[3] / 2, instance_box[0] + instance_box[3] / 2, instance_box[0] + instance_box[3] / 2, instance_box[0] - instance_box[3] / 2,
+                                          instance_box[0] - instance_box[3] / 2, instance_box[0] + instance_box[3] / 2, instance_box[0] + instance_box[3] / 2, instance_box[0] - instance_box[3] / 2])
         # swap instance_box[1] and instance_box[2], and time -1 to instance_box[2]
 
-        pseudo_label[1][:, 1] = -1 * np.array([instance_box[2] - instance_box[5] / 2, instance_box[2] - instance_box[5] / 2, instance_box[2] + instance_box[5] / 2, instance_box[2] + instance_box[5] / 2, 
-                                        instance_box[2] - instance_box[5] / 2, instance_box[2] - instance_box[5] / 2, instance_box[2] + instance_box[5] / 2, instance_box[2] + instance_box[5] / 2])
-        pseudo_label[1][:, 2] = np.array([(instance_box[1] - instance_box[4] / 2), instance_box[1] - instance_box[4] / 2, instance_box[1] - instance_box[4] / 2, instance_box[1] - instance_box[4] / 2, 
-                                        instance_box[1] + instance_box[4] / 2, instance_box[1] + instance_box[4] / 2, instance_box[1] + instance_box[4] / 2, instance_box[1] + instance_box[4] / 2])
-        pseudo_label.append(1) # probability of the class is 1 for gound truth
+        pseudo_label[1][:, 1] = -1 * np.array([instance_box[2] - instance_box[5] / 2, instance_box[2] - instance_box[5] / 2, instance_box[2] + instance_box[5] / 2, instance_box[2] + instance_box[5] / 2,
+                                               instance_box[2] - instance_box[5] / 2, instance_box[2] - instance_box[5] / 2, instance_box[2] + instance_box[5] / 2, instance_box[2] + instance_box[5] / 2])
+        pseudo_label[1][:, 2] = np.array([(instance_box[1] - instance_box[4] / 2), instance_box[1] - instance_box[4] / 2, instance_box[1] - instance_box[4] / 2, instance_box[1] - instance_box[4] / 2,
+                                          instance_box[1] + instance_box[4] / 2, instance_box[1] + instance_box[4] / 2, instance_box[1] + instance_box[4] / 2, instance_box[1] + instance_box[4] / 2])
+        pseudo_label.append(1)  # probability of the class is 1 for gound truth
 
         return pseudo_label
 
@@ -439,6 +457,31 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
                                       for i in range(len(pseudo_labels[0]))]
 
         return nms_in_pseudo_labels
+
+    def set_cls_threshold(self):
+        self.static_base_pseudo_thresholds_list = SCANNET_BASE_PSEUDO_THRESHOLDS[
+            self.dataset_config.num_base_class]
+        self.dynamic_base_pseudo_thresholds_list = SCANNET_BASE_PSEUDO_THRESHOLDS[
+            self.dataset_config.num_base_class]
+
+    def update_dynamic_base_pseudo_thresholds_list(self, tau=1, phi=None):
+        # tau is a float between 0 and 1.
+        # phi is a list of length self.dataset_config.num_base_class.
+        # phi[i] is a float between 0 and 1.
+        # The new threshold for class i is tau * self.dynamic_base_pseudo_thresholds_list[i] + (1 - tau) * phi[i]*self.dynamic_base_pseudo_thresholds_list[i]
+
+        if phi is None:
+            print('phi is None. No update is performed.')
+            return
+        else:
+            for i in range(self.dataset_config.num_base_class):
+                self.dynamic_base_pseudo_thresholds_list[i] = tau * \
+                    self.dynamic_base_pseudo_thresholds_list[i] + \
+                    (1 - tau) * phi[i] * \
+                    self.dynamic_base_pseudo_thresholds_list[i]
+            # crop the threshold to be between 1/num_base_class and 0.95
+            self.dynamic_base_pseudo_thresholds_list = [
+                min(0.95, max(1 / self.dataset_config.num_base_class, x)) for x in self.dynamic_base_pseudo_thresholds_list]
 
     def __len__(self):
         return len(self.scan_names)
@@ -512,7 +555,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             point_cloud,
             point_cloud.min(axis=0)[:3],
             point_cloud.max(axis=0)[:3],
-            self.base_detector
+            self.base_detector,
+            threshold_list=self.static_base_pseudo_thresholds_list
         )
 
         # if use_ema_pseudo_label, get pseudo labels from ema detector and append to pseudo_labels
@@ -521,7 +565,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
                 ema_point_cloud,
                 ema_point_cloud.min(axis=0)[:3],
                 ema_point_cloud.max(axis=0)[:3],
-                self.ema_detector
+                self.ema_detector,
+                threshold_list=self.dynamic_base_pseudo_thresholds_list
             )
             # map class using nyu40id2class in instance_bboxes
             for i in range(len(instance_bboxes)):
@@ -529,7 +574,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             # convert gt instance_bboxes to pseudo label format then to nms_in format
             gt_labels = []
             for i in range(len(instance_bboxes)):
-                gt_labels.append(self.instance_box_to_pseudo_label(instance_bboxes[i]))
+                gt_labels.append(
+                    self.instance_box_to_pseudo_label(instance_bboxes[i]))
 
             # add a dimension to gt_labels
             gt_labels = [gt_labels]
@@ -542,11 +588,13 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             nms_in_ema_pseudo_labels = self.convert_to_nms_in(ema_pseudo_labels)
 
             # combine all 3 labels and pseudo labels
-            nms_in_all_labels = np.concatenate((nms_in_gt_labels, nms_in_pseudo_labels, nms_in_ema_pseudo_labels), axis=0)
+            nms_in_all_labels = np.concatenate(
+                (nms_in_gt_labels, nms_in_pseudo_labels, nms_in_ema_pseudo_labels), axis=0)
 
             # # do nms for pseudo_labels and ground truth instance_bboxes using nms_3d_faster_base_novel
             # remove base pseudo labels if they overlap with novel pseudo labels, otherwise keep them.
-            nms_out_all_labels_idx = nms_3d_faster_base_novel(boxes=nms_in_all_labels, overlap_threshold=self.nms_threshold_base_novel, num_base_cls=self.dataset_config.num_base_class, old_type=False)
+            nms_out_all_labels_idx = nms_3d_faster_base_novel(
+                boxes=nms_in_all_labels, overlap_threshold=self.nms_threshold_base_novel, num_base_cls=self.dataset_config.num_base_class, old_type=False)
             # filter nms_in_all_labels by nms_out_all_labels
             nms_in_all_labels_filtered = nms_in_all_labels[nms_out_all_labels_idx]
 
@@ -556,27 +604,29 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
 
             # nms_in_all_labels_filtered can be used for class wise NMS in the following code.
             # use nms_3d_faster_samecls to get the final pseudo labels
-            nms_in_all_labels_filtered_after_cls_nms_idx = nms_3d_faster_samecls(nms_in_all_labels_filtered, self.nms_threshold, old_type=False)
+            nms_in_all_labels_filtered_after_cls_nms_idx = nms_3d_faster_samecls(
+                nms_in_all_labels_filtered, self.nms_threshold, old_type=False)
             # filter nms_in_pseudo_labels_combined by nms_out_pseudo_labels
-            nms_in_all_labels_filtered_after_cls_nms = nms_in_all_labels_filtered[nms_in_all_labels_filtered_after_cls_nms_idx]
+            nms_in_all_labels_filtered_after_cls_nms = nms_in_all_labels_filtered[
+                nms_in_all_labels_filtered_after_cls_nms_idx]
 
             # convert nms_in_pseudo_labels_combined_filtered to pseudo_labels' format
             all_labels_filtered_after_cls_nms = []
             for i in range(len(nms_in_all_labels_filtered_after_cls_nms)):
                 all_labels_filtered_after_cls_nms.append((int(nms_in_all_labels_filtered_after_cls_nms[i][7]), np.array([[nms_in_all_labels_filtered_after_cls_nms[i][0], nms_in_all_labels_filtered_after_cls_nms[i][1], nms_in_all_labels_filtered_after_cls_nms[i][2]],
-                                                                                                            [nms_in_all_labels_filtered_after_cls_nms[i][3], nms_in_all_labels_filtered_after_cls_nms[i][4], nms_in_all_labels_filtered_after_cls_nms[i][5]]], dtype=np.float32), nms_in_all_labels_filtered_after_cls_nms[i][6]))
+                                                                                                                         [nms_in_all_labels_filtered_after_cls_nms[i][3], nms_in_all_labels_filtered_after_cls_nms[i][4], nms_in_all_labels_filtered_after_cls_nms[i][5]]], dtype=np.float32), nms_in_all_labels_filtered_after_cls_nms[i][6]))
             # print the number of pseudo labels before and after NMS
             # print(f'{idx} N pseudo labels before NMS: ', len(nms_in_pseudo_labels_combined))
             # print(f'{idx} N pseudo labels after NMS: ', len(nms_in_pseudo_labels_combined_filtered))
             # let pseudo_labels be pseudo_labels_filtered
-            pseudo_labels = [all_labels_filtered_after_cls_nms] # pseudo_labels is a list of length 1
+            # pseudo_labels is a list of length 1
+            pseudo_labels = [all_labels_filtered_after_cls_nms]
             # print(f'{idx} labels after cls NMS: ', len(all_labels_filtered_after_cls_nms))
             # # convert nms_in_all_labels_filtered to pseudo_labels' format1
             # all_labels_filtered = []
             # for i in range(len(nms_in_all_labels_filtered)):
             #     all_labels_filtered.append((int(nms_in_all_labels_filtered[i][7]), np.array([[nms_in_all_labels_filtered[i][0], nms_in_all_labels_filtered[i][1], nms_in_all_labels_filtered[i][2]],
             #                                                                                   [nms_in_all_labels_filtered[i][3], nms_in_all_labels_filtered[i][4], nms_in_all_labels_filtered[i][5]]], dtype=np.float32), nms_in_all_labels_filtered[i][6]))
-
 
             no_base_obj = 0
             no_obj = 0
@@ -635,7 +685,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         if len(converted_instance_bboxes) > max_converted_instance_bboxes_num:
             print(
                 'Warning: converted_instance_bboxes is more than MAX_NUM_OBJ - the number of instance_bboxes')
-            converted_instance_bboxes = converted_instance_bboxes[0: max_converted_instance_bboxes_num]
+            converted_instance_bboxes = converted_instance_bboxes[0:
+                                                                  max_converted_instance_bboxes_num]
 
         # concat converted_instance_bboxes and instance_bboxes
         converted_instance_bboxes_no_cls = [
@@ -649,7 +700,7 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             # if gt is NMSed,
             # if len(converted_instance_bboxes) + instance_bboxes.shape[0] > MAX_NUM_OBJ:
             # if gt is not NMSed, converted_instance_bboxes already includes instance_bboxes
-            if len(converted_instance_bboxes)  > MAX_NUM_OBJ:
+            if len(converted_instance_bboxes) > MAX_NUM_OBJ:
                 target_bboxes_mask[:] = 1
             else:
                 # target_bboxes_mask[0: len(converted_instance_bboxes) +
@@ -659,7 +710,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             # no pseudo labels, only instance labels
             # assuming instance_bboxes is no more than MAX_NUM_OBJ
             # target_bboxes_mask[0: instance_bboxes.shape[0]] = 1
-            print('Warning: no pseudo labels nor instance labels') # converted instance bboxes include instance bboxes but is empty.
+            # converted instance bboxes include instance bboxes but is empty.
+            print('Warning: no pseudo labels nor instance labels')
 
         # make sure target_bboxes is no more than MAX_NUM_OBJ
         # this line will always trigger because target_bboxes is already MAX_NUM_OBJ

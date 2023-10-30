@@ -151,8 +151,18 @@ def make_args_parser():
                         default=100, help='length of the consistency loss ramp-up')
 
     # ema pseudo labels
-    parser.add_argument("--use_ema_pseudo_label", default=False, action="store_true")
-    parser.add_argument("--ema_nms_threshold", type=float, default=0.5, help="nms threshold for ema pseudo labels")
+    parser.add_argument("--use_ema_pseudo_label",
+                        default=False, action="store_true")
+    parser.add_argument("--ema_nms_threshold", type=float,
+                        default=0.5, help="nms threshold for ema pseudo labels")
+
+    # Pseudo label specific args
+    parser.add_argument("--use_cls_threshold", default=False, action="store_true",
+                        help='use cls specific threshold to filter out low confidence predictions')
+    parser.add_argument("--use_dynamic_threshold", default=False, action="store_true",
+                        help='use dynamic cls specific threshold for baes class predictions in the dynamic teachers prediction in the train set')
+    parser.add_argument("--dynamic_div_by", required=True, type=str, choices=[
+                        "first", "last"], help='first means divide by the number of objects in the first epoch, last means divide by the number of objects in the last epoch')
 
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
@@ -192,7 +202,8 @@ def do_train(
     dataset_config_val,
     dataloaders,
     best_val_metrics,
-    static_teacher=None
+    static_teacher=None,
+    dataset_train=None,
 ):
     """
     Main training loop.
@@ -217,6 +228,10 @@ def do_train(
 
     logger = Logger(args.checkpoint_dir)
 
+    tau_global_epoch = 1.
+    # phi_list is a list of 1s with length num_base_class
+    phi_list = [1. for _ in range(args.num_base_class)]
+    number_counts_pred_all_epochs = []
     for epoch in range(args.start_epoch, args.max_epoch):
         if is_distributed():
             dataloaders["train_sampler"].set_epoch(epoch)
@@ -246,7 +261,84 @@ def do_train(
         )
 
         metrics = aps.compute_metrics()
-        metric_str = aps.metrics_to_str(metrics, per_class=False) # not using per class to save space
+
+        # split the metrics into base and novel classes
+        # metrics is an OrderedDict
+        metrics_base = list(metrics[0.25].values())[:args.num_base_class]
+        metrics_novel = list(metrics[0.25].values())[
+            args.num_base_class:args.num_base_class + args.num_novel_class]
+        # metrics_base = {k: metrics[k]
+        #                 for k in list(metrics)[:args.num_base_class]}
+        # metrics_novel = {k: metrics[k]
+        #                  for k in list(metrics)[args.num_base_class:args.num_base_class + args.num_novel_class]}
+
+        average_ap_base = sum(metrics_base) / len(metrics_base)
+        average_ap_novel = sum(metrics_novel) / len(metrics_novel)
+        print(f'Base mAP: {average_ap_base:.4f}')
+        print(f'novel mAP: {average_ap_novel:.4f}')
+
+        # update tau_global_epoch, skip the first args.distillation_ramp_len epochs for stabilization
+        # TODO change 0.8 and 0.2 to more generic values
+        tau_global_epoch = 0.8 + 0.2 * (args.num_base_class / (args.num_base_class + args.num_novel_class) + args.num_novel_class / (
+            args.num_base_class + args.num_novel_class) * average_ap_novel)
+
+        # count the number of base class objects in each class, note the counting should be in the *train set*.
+        number_counts_pred_current = {}
+        # initialize with 0s
+        for i in range(args.num_base_class):
+            number_counts_pred_current[i] = 0
+
+        for i in range(len(aps.gt_map_cls)):  # batch size
+            # number of objects in each image
+            for _j in range(len(aps.gt_map_cls[i])):
+                current_pseudo_label = aps.gt_map_cls[i][_j]
+                current_pseudo_label_class = current_pseudo_label[0]
+                if current_pseudo_label_class < args.num_base_class:
+                    number_counts_pred_current[current_pseudo_label_class] += 1
+        number_counts_pred_all_epochs.append(number_counts_pred_current)
+        # update phi_list. Each value is the ratio between the number of objects in the current epoch and the number of objects in the first epoch by class
+
+        if args.dynamic_div_by == "first":
+            result_to_compare = number_counts_pred_all_epochs[0]
+        elif args.dynamic_div_by == "last":
+            if len(number_counts_pred_all_epochs) == 1:
+                result_to_compare = number_counts_pred_all_epochs[-1]
+            else:
+                result_to_compare = number_counts_pred_all_epochs[-2]
+        for i in range(args.num_base_class):
+            # the ratio is 1 if 0 objects are detected in the first epoch
+            if result_to_compare[i] == 0:
+                print(f'Class {i} has 0 objects in the last epoch!')
+                phi_list[i] = 1.
+            else:
+                phi_list[i] = number_counts_pred_all_epochs[-1][i] / \
+                    result_to_compare[i]
+
+        if args.use_dynamic_threshold and epoch >= args.distillation_ramp_len:
+            print('update dynamic thresholds in the dataset')
+            # update thresholds in the dataset
+            dataset_train.update_dynamic_base_pseudo_thresholds_list(
+                tau_global_epoch, phi_list)
+        else:
+            print(
+                'do not update dynamic thresholds in the dataset during the ramp up period')
+
+        if is_primary():
+            # log tau and phi, when print phi_list print up to 4 decimal places
+            print(
+                f"Epoch {epoch}; Tau {tau_global_epoch:.4f}; Phi {[f'{_phi:.4f}' for _phi in phi_list]}")
+            print(number_counts_pred_all_epochs[-1])
+            # tau_global_epoch change to float
+            tau_global_epoch = float(tau_global_epoch)
+            logger.log_scalars({'tau': tau_global_epoch},
+                               epoch, prefix="Train/")
+
+            for idx, phi in enumerate(phi_list):
+                logger.log_scalars(
+                    {f'phi_{idx}': float(phi)}, epoch, prefix="Train/")
+
+        # not using per class to save space
+        metric_str = aps.metrics_to_str(metrics, per_class=False)
         metrics_dict = aps.metrics_to_dict(metrics)
         curr_iter = epoch * len(dataloaders["train"])
         if is_primary():
@@ -513,6 +605,9 @@ def main(local_rank, args):
     # set set_ap_config_dict
     datasets['train'].set_ap_config_dict(ap_config_dict)
 
+    # set cls threshold for the train set
+    datasets['train'].set_cls_threshold()
+
     model, _ = build_model(args, dataset_config_train)
     model = model.cuda(local_rank)
     model_no_ddp = model
@@ -642,7 +737,8 @@ def main(local_rank, args):
             dataset_config_val,
             dataloaders,
             best_val_metrics,
-            static_teacher=base_detection_model
+            static_teacher=base_detection_model,
+            dataset_train=datasets['train'],
         )
 
 

@@ -216,7 +216,8 @@ def build_dataset_Pseudo_2_source_EMA(args):
             use_color=args.use_color,
             augment=True,
             use_ema_pseudo_label=args.use_ema_pseudo_label,
-            nms_threshold=args.ema_nms_threshold
+            nms_threshold=args.ema_nms_threshold,
+            use_cls_threshold=args.use_cls_threshold,
         ),
         "test": dataset_builder_test(
             dataset_config_val,
@@ -262,9 +263,11 @@ def build_dataset_Pseudo_2_source_EMA_v2(args):
     }
     return dataset_dict, dataset_config_train, dataset_config_val, dataset_config_base
 
+
 def build_dataset_Pseudo_2_source_EMA_free_match(args):
     # TODO The current implementation is not correct. the train dataset should not load base classes labels.
-    dataset_builder_train = DATASET_FUNCTIONS_Pseudo_2_source_EMA_free_match[args.dataset_name][0]
+    dataset_builder_train = DATASET_FUNCTIONS_Pseudo_2_source_EMA_free_match[
+        args.dataset_name][0]
     dataset_builder_test = DATASET_FUNCTIONS_BASE[args.dataset_name][0]
     dataset_config_train = DATASET_FUNCTIONS_Pseudo_2_source_EMA_free_match[args.dataset_name][1](
         num_base_class=args.num_base_class, num_novel_class=args.num_novel_class)
@@ -329,9 +332,11 @@ def build_dataset_Pseudo_2_source_EMA_v2(args):
     }
     return dataset_dict, dataset_config_train, dataset_config_val, dataset_config_base
 
+
 def build_dataset_Pseudo_2_source_EMA_free_match(args):
     # TODO The current implementation is not correct. the train dataset should not load base classes labels.
-    dataset_builder_train = DATASET_FUNCTIONS_Pseudo_2_source_EMA_free_match[args.dataset_name][0]
+    dataset_builder_train = DATASET_FUNCTIONS_Pseudo_2_source_EMA_free_match[
+        args.dataset_name][0]
     dataset_builder_test = DATASET_FUNCTIONS_BASE[args.dataset_name][0]
     dataset_config_train = DATASET_FUNCTIONS_Pseudo_2_source_EMA_free_match[args.dataset_name][1](
         num_base_class=args.num_base_class, num_novel_class=args.num_novel_class)
@@ -350,7 +355,7 @@ def build_dataset_Pseudo_2_source_EMA_free_match(args):
             use_color=args.use_color,
             augment=True,
             use_ema_pseudo_label=args.use_ema_pseudo_label,
-            nms_threshold = args.ema_nms_threshold
+            nms_threshold=args.ema_nms_threshold
         ),
         "test": dataset_builder_test(
             dataset_config_val,

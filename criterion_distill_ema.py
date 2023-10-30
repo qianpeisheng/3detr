@@ -669,24 +669,32 @@ class SetCriterion(nn.Module):
                 loss_wt_key in self.loss_weight_dict
                 and self.loss_weight_dict[loss_wt_key] > 0
             ) or loss_wt_key not in self.loss_weight_dict:
-                if 'center_consistency' in k and is_last:
-                    curr_loss, indices, masked_dist2 = self.loss_functions[k](
-                        outputs, ema_outputs)
-                elif 'cls_consistency' in k or 'size_consistency' in k and is_last:
-                    curr_loss = self.loss_functions[k](
-                        outputs, ema_outputs, indices, masked_dist2)
+                if 'center_consistency' in k:
+                    if is_last:
+                        curr_loss, indices, masked_dist2 = self.loss_functions[k](
+                            outputs, ema_outputs)
+                    # else:
+                    #     curr_loss = None
+                elif 'cls_consistency' in k or 'size_consistency' in k:
+                    if is_last:
+                        curr_loss = self.loss_functions[k](
+                            outputs, ema_outputs, indices, masked_dist2)
+                    # else:
+                    #     curr_loss = 0
                 # only compute losses with loss_wt > 0
                 # certain losses like cardinality are only logged and have no loss weight
                 # use static outputs for distillation loss
-                elif k == "loss_distill" and is_last:
-                    if outputs_static is None:
-                        # during evaluation outputs_static is None, and there is no distillation loss.
-                        # curr_loss = torch.zeros(1, device='cuda:0') # dummy loss TODO: does not work with multi-gpu
-                        curr_loss = None
-                    else:
+                elif k == "loss_distill":
+                    if is_last and outputs_static is not None:
                         # print(k, " Using static outputs for distillation loss")
                         curr_loss = self.loss_functions[k](
                             outputs, outputs_static, assignments)
+                        # curr_loss = 0
+                    # elif outputs_static is None:
+                    #     # during evaluation outputs_static is None, and there is no distillation loss.
+                    #     # curr_loss = torch.zeros(1, device='cuda:0') # dummy loss TODO: does not work with multi-gpu
+                    #     curr_loss = 0
+                    # else:
 
                 else:
                     curr_loss = self.loss_functions[k](

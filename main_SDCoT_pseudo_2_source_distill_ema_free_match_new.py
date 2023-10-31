@@ -230,9 +230,10 @@ def do_train(
 
     logger = Logger(args.checkpoint_dir)
 
-    tau_global = 0.9
+    tau_global = 1. # with hand picked class thresholds, tau_global initially should be 1
     # phi_list is a list of 1s with length num_base_class
-    p_class = np.array([0.9 for _ in range(args.num_base_class)])
+    # p_class = np.array([0.9 for _ in range(args.num_base_class)])
+    p_class = dataset_train.dynamic_base_pseudo_thresholds_list
     # number_counts_pred_all_epochs = []
     for epoch in range(args.start_epoch, args.max_epoch):
         if is_distributed():
@@ -285,7 +286,7 @@ def do_train(
         # TODO change 0.8 and 0.2 to more generic values
         # tau_global_epoch = 0.8 + 0.2 * (args.num_base_class / (args.num_base_class + args.num_novel_class) + args.num_novel_class / (
         #     args.num_base_class + args.num_novel_class) * average_ap_novel)
-        # tau_global_epoch = args.ema_decay * tau_global_epoch + (1 - args.ema_decay) * 
+        # tau_global_epoch = args.ema_decay * tau_global_epoch + (1 - args.ema_decay) *
         # count the number of base class objects in each class, note the counting should be in the *train set*.
         # number_counts_pred_current = {}
         # initialize with 0s

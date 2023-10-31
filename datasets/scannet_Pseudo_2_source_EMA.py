@@ -464,7 +464,7 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             self.dataset_config.num_base_class]
         self.dynamic_base_pseudo_thresholds_list = SCANNET_BASE_PSEUDO_THRESHOLDS[
             self.dataset_config.num_base_class]
-        
+
     def update_dynamic_base_pseudo_thresholds_list(self, p_class):
         self.dynamic_base_pseudo_thresholds_list = p_class
 
@@ -857,6 +857,6 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         ret_dict['arr_of_cls_dynamic'] = arr_of_cls_dynamic
         ret_dict['arr_of_prob_dynamic'] = arr_of_prob_dynamic
 
-        return ret_dict # 
+        return ret_dict #
 
 # TODO add testing code below

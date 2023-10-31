@@ -14,8 +14,8 @@ CUDA_VISIBLE_DEVICES=0 python3 main_SDCoT_pseudo_ema.py \
 --matcher_objectness_cost 0 \
 --loss_giou_weight 1 \
 --loss_no_object_weight 0.25 \
---save_separate_checkpoint_every_epoch 50 \
---eval_every_epoch 50 \
+--save_separate_checkpoint_every_epoch 25 \
+--eval_every_epoch 25 \
 --dataset_num_workers 4 \
 --batchsize_per_gpu 8 \
 --enc_type vanilla \

@@ -241,7 +241,7 @@ def parse_predictions(
 # use base classes only because
 # the base detector is trained on base classes only.
 def parse_predictions_SDCoT(
-    predicted_boxes, sem_cls_probs, objectness_probs, point_cloud, config_dict, use_cls_threshold=False, threshold_list=None
+    predicted_boxes, sem_cls_probs, objectness_probs, point_cloud, config_dict, use_cls_threshold=False, threshold_list=None, return_all_cls_probs=False
 ):
     """Parse predictions to OBB parameters and suppress overlapping boxes
 
@@ -403,17 +403,32 @@ def parse_predictions_SDCoT(
             cur_list = []
             for ii in range(config_dict["dataset_config"].num_base_class):
                 if use_cls_threshold:
-                    cur_list += [
-                        (
-                            ii,
-                            pred_corners_3d_upright_camera[i, j],
-                            sem_cls_probs[i, j, ii] * obj_prob[i, j],
-                        )
-                        for j in range(pred_corners_3d_upright_camera.shape[1])
-                        if pred_mask[i, j] == 1
-                        and obj_prob[i, j] > threshold_list[ii]
-                        and sem_cls_probs[i, j, ii] > threshold_list[ii]
-                    ]
+                    if return_all_cls_probs:
+                        # for dynamic thresholding
+                        cur_list += [
+                            (
+                                ii,
+                                pred_corners_3d_upright_camera[i, j],
+                                sem_cls_probs[i, j, ii] * obj_prob[i, j],
+                                sem_cls_probs[i, j]
+                            )
+                            for j in range(pred_corners_3d_upright_camera.shape[1])
+                            if pred_mask[i, j] == 1
+                            and obj_prob[i, j] > threshold_list[ii]
+                            and sem_cls_probs[i, j, ii] > threshold_list[ii]
+                        ]
+                    else:
+                        cur_list += [
+                            (
+                                ii,
+                                pred_corners_3d_upright_camera[i, j],
+                                sem_cls_probs[i, j, ii] * obj_prob[i, j],
+                            )
+                            for j in range(pred_corners_3d_upright_camera.shape[1])
+                            if pred_mask[i, j] == 1
+                            and obj_prob[i, j] > threshold_list[ii]
+                            and sem_cls_probs[i, j, ii] > threshold_list[ii]
+                        ]
                 else:
                     cur_list += [
                         (
@@ -534,7 +549,7 @@ class APCalculator(object):
     def step_meter(self, outputs, targets):
         if "outputs" in outputs:
             outputs = outputs["outputs"]
-        self.step(
+        batch_pred_map_cls, batch_gt_map_cls = self.step(
             predicted_box_corners=outputs["box_corners"],
             sem_cls_probs=outputs["sem_cls_prob"],
             objectness_probs=outputs["objectness_prob"],
@@ -543,6 +558,7 @@ class APCalculator(object):
             gt_box_sem_cls_labels=targets["gt_box_sem_cls_label"],
             gt_box_present=targets["gt_box_present"],
         )
+        return batch_pred_map_cls, batch_gt_map_cls
 
     def step(
         self,
@@ -574,6 +590,8 @@ class APCalculator(object):
         )
 
         self.accumulate(batch_pred_map_cls, batch_gt_map_cls)
+        return batch_pred_map_cls, batch_gt_map_cls
+
 
     def step_SDCoT(
         self,

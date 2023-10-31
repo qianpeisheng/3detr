@@ -1,11 +1,11 @@
 #!/bin/bash
 # Copyright (c) Facebook, Inc. and its affiliates.
 
-CUDA_VISIBLE_DEVICES=0 python3 main_SDCoT_pseudo_2_source_distill_ema_free_match_new.py \
+CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT_pseudo_2_source_distill_ema_free_match_new.py \
 --dataset_name scannet \
 --model_name 3detr_distill \
---num_base_class 9 \
---num_novel_class 9 \
+--num_base_class 14 \
+--num_novel_class 4 \
 --max_epoch 310 \
 --nqueries 256 \
 --matcher_giou_cost 2 \
@@ -30,5 +30,5 @@ CUDA_VISIBLE_DEVICES=0 python3 main_SDCoT_pseudo_2_source_distill_ema_free_match
 --use_cls_threshold \
 --use_dynamic_threshold \
 --dynamic_div_by last \
---checkpoint_dir ckpts_scannet/debug_7_no_aux_d_c_scannet_SDCoT_9_9_dynamic_cls_threshold_last_richard \
---checkpoint_name checkpoint_best_6480.pth
+--checkpoint_dir ckpts_scannet/debug_7_no_aux_d_c_scannet_SDCoT_14_4_dynamic_cls_threshold_new_richard \
+--checkpoint_name checkpoint_best_5973.pth

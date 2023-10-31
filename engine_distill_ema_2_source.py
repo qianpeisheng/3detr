@@ -5,7 +5,7 @@ import logging
 import math
 import time
 import sys
-
+import numpy as np
 from torch.distributed.distributed_c10d import reduce
 from utils.ap_calculator import APCalculator
 from utils.misc import SmoothedValue
@@ -67,7 +67,13 @@ def train_one_epoch(
     dataset_loader,
     logger,
     static_teacher,
+    tau_global,
+    p_class,
+    dataset_train
 ):
+    '''
+    p_class is a list of float numbers, each of which is the threshold for each class. The size of p_class is num_base_class.
+    '''
 
     ap_calculator = APCalculator(
         dataset_config=dataset_config,
@@ -113,7 +119,53 @@ def train_one_epoch(
             f"Current consistent weight scale: {curr_consistent_weight_scale:.6f}")
     num_no_obj = 0
     num_no_base_obj = 0
+
     for batch_idx, batch_data_label in enumerate(dataset_loader):
+        arr_of_cls_dynamic = batch_data_label['arr_of_cls_dynamic'] # a numpy array of shape [B, N]
+        unique_elements, counts = np.unique(arr_of_cls_dynamic, return_counts=True)
+        sum_count = 0
+        for index, count in zip(unique_elements, counts):
+            if index < 0:
+                continue
+            else:
+                sum_count += count
+        
+
+        arr_of_prob_dynamic = batch_data_label['arr_of_prob_dynamic'].cpu().numpy() # numpy array of shape [B, N, num_class]
+        # get max prob for each proposal, shape [B, N]
+        max_prob_dynamic = np.max(arr_of_prob_dynamic, axis=2)
+        # change -1 to 0 in max_prob_dynamic
+        max_prob_dynamic[max_prob_dynamic < 0] = 0
+
+        if sum_count > 0:
+            # update tau_global
+            tau_global = args.ema_decay * tau_global + (1 - args.ema_decay) * np.sum(max_prob_dynamic) / sum_count
+
+            # update p_class
+            # change -1 to 0 in arr_of_prob_dynamic
+            arr_of_prob_dynamic[arr_of_prob_dynamic < 0] = 0
+            # sum over all batches and proposals for each class
+            sum_prob_dynamic = np.sum(arr_of_prob_dynamic, axis=(0, 1)) # shape [num_class]
+            # normalize by sum_count
+            sum_prob_dynamic = sum_prob_dynamic / sum_count
+
+            # update p_class
+            p_class = args.ema_decay * p_class + (1 - args.ema_decay) * sum_prob_dynamic
+
+            # p_class = [args.ema_decay * p_class[i] + (1 - args.ema_decay) * sum_prob_dynamic[i] for i in range(dataset_config.num_base_class)]
+            # normalize p_class by max value
+            p_class = p_class / np.max(p_class)
+
+            # update p_class by multiplying with tau_global
+            p_class = p_class * tau_global
+
+            # update p_class in dataset['train']
+            dataset_train.update_dynamic_base_pseudo_thresholds_list(p_class)
+
+
+        else:
+            print('sum_count is 0!')
+
         curr_time = time.time()
         curr_lr = adjust_learning_rate(args, optimizer, curr_iter / max_iters)
         for key in batch_data_label:
@@ -145,6 +197,45 @@ def train_one_epoch(
         }
         outputs, query_xyz, pos_embed, enc_inds, interim_inds, *_ = model(
             inputs)
+        
+        # base_cls_probs = outputs['outputs']['sem_cls_prob'][...,:dataset_config.num_base_class]
+        # # base_cls_probs has shape [B, N, num_base_class]
+        # max_base_cls_probs, _ = torch.max(base_cls_probs, dim=2) # shape [B, N]
+
+        # # select top 5% points with highest base class probability
+        # # max_base_cls_probs has shape [B, N]
+        # max_base_cls_probs_top_10_pct = torch.topk(max_base_cls_probs, int(0.05 * max_base_cls_probs.shape[1]), dim=1, largest=True, sorted=True)[0] # shape [B, int(0.1 * N)]
+
+        # # tau_batch
+        # tau_global_batch = torch.sum(max_base_cls_probs_top_10_pct) / (max_base_cls_probs_top_10_pct.shape[0] * max_base_cls_probs_top_10_pct.shape[1])
+        # # update tau_global
+        # tau_global = args.ema_decay * tau_global + (1 - args.ema_decay) * tau_global_batch
+
+        # # # update max_pred_prob_list
+        # # for i in range(dataset_config.num_base_class):
+        # #     if max_base_cls_probs[i] > max_pred_prob_list[i]:
+        # #         max_pred_prob_list[i] = max_base_cls_probs[i]
+
+        # # avg
+        # avg_base_cls_probs = torch.mean(base_cls_probs, dim=1) # shape [B, num_base_class]
+        # avg_base_cls_probs = torch.mean(avg_base_cls_probs, dim=0) # shape [num_base_class]
+        
+        # # normalize by max avg
+        # avg_base_cls_probs_norm = avg_base_cls_probs / torch.max(avg_base_cls_probs)
+
+        # # to list
+
+        # # update p_class
+        # p_class = args.ema_decay * p_class + (1 - args.ema_decay) * avg_base_cls_probs_norm
+
+        # # update avg_pred_prob_list
+        # for i in range(dataset_config.num_base_class):
+        #     avg_pred_prob_list[i].append(avg_base_cls_probs[i].item())
+
+        # get the predicted probability for each class if the class is a base class
+        # outputs['outputs']['sem_cls_prob'] is [B, N, num_class]
+        # batch_data_label['sem_cls_label'] is [B, N]
+        # batch_data_label['no_obj'] is [B]
 
         # Add augmentation related information to outputs to facilitate consistency loss computation.
         outputs['outputs']['flip_x_axis'] = batch_data_label['flip_x_axis']
@@ -208,8 +299,12 @@ def train_one_epoch(
             # If GPU memory is not an issue, uncomment the following lines.
             # outputs["outputs"] = all_gather_dict(outputs["outputs"])
             # batch_data_label = all_gather_dict(batch_data_label)
-            ap_calculator.step_meter(outputs, batch_data_label)
-
+            batch_pred_map_cls, batch_gt_map_cls = ap_calculator.step_meter(outputs, batch_data_label)
+            logger.log_scalars({'tau_global': tau_global}, curr_iter, prefix="Train_details/")
+            for idx, phi in enumerate(p_class):
+                logger.log_scalars({f'phi_{idx}': float(phi)}, curr_iter, prefix="Train/")
+            print(
+                f"Iter {curr_iter}; Tau {tau_global:.4f}; Phi {[f'{_phi:.4f}' for _phi in p_class]}")
         time_delta.update(time.time() - curr_time)
         loss_avg.update(loss_reduced.item())
 
@@ -270,7 +365,14 @@ def train_one_epoch(
         update_ema_variables(model, ema_model, args.ema_decay, curr_iter)
         barrier()
 
-    return ap_calculator
+    return ap_calculator, tau_global, p_class
+    # average the avg_pred_prob_list
+    # avg_pred_prob_list = [sum(avg_pred_prob_list[i]) / len(avg_pred_prob_list[i]) for i in range(dataset_config.num_base_class)]
+
+    # use max norm to normalize avg_pred_prob_list
+    # max_avg_pred_prob = max(avg_pred_prob_list)
+    # avg_pred_prob_list_norm = [avg_pred_prob_list[i] / max_avg_pred_prob for i in range(dataset_config.num_base_class)]
+    # return ap_calculator, avg_pred_prob_list_norm, max_pred_prob_list # avg_pred_prob_list_norm is a list of float numbers, max_pred_prob_list is a list of cuda tensors
 
 
 @torch.no_grad()

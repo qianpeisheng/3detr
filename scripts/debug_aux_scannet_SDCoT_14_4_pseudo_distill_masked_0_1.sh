@@ -4,8 +4,8 @@
 CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT_pseudo_distill.py \
 --dataset_name scannet \
 --model_name 3detr_distill \
---num_base_class 9 \
---num_novel_class 9 \
+--num_base_class 14 \
+--num_novel_class 4 \
 --max_epoch 310 \
 --nqueries 256 \
 --matcher_giou_cost 2 \
@@ -21,5 +21,5 @@ CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT_pseudo_distill.py \
 --enc_type masked \
 --distillation_ramp_len 100 \
 --loss_distill_weight 0.1 \
---checkpoint_dir ckpts_scannet/debug_2_aux_scannet_SDCoT_9_9_pseudo_distill_masked_0_1 \
---checkpoint_name checkpoint_best_6480.pth
+--checkpoint_dir ckpts_scannet/debug_aux_scannet_SDCoT_14_4_pseudo_distill_masked_0_1 \
+--checkpoint_name checkpoint_best_5973.pth

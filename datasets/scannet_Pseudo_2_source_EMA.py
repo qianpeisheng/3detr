@@ -36,12 +36,12 @@ DATASET_METADATA_DIR = "scannet_data/scannet/meta_data"
 NUM_CLASS_BASE = 9  # depending on the base training classes.
 NUM_CLASS_INCREMENTAL = 9  # depending on the incremental training classes.
 
-SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = [
-    0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21]
-SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = [
-    0.93, 0.95, 0.84, 0.8, 0.73, 0.75, 0.7, 0.82, 0.22, 0.69, 0.85, 0.68, 0.85, 0.85]
-SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = [
-    0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21]  # TODO update this
+SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = np.array([
+    0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21])
+SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = np.array([
+    0.93, 0.95, 0.84, 0.8, 0.73, 0.75, 0.7, 0.82, 0.22, 0.69, 0.85, 0.68, 0.85, 0.85])
+SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = np.array([
+    0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21])  # TODO update this
 
 SCANNET_BASE_PSEUDO_THRESHOLDS = {
     9: SCANNET_9_9_BASE_PSEUDO_THRESHOLDS,
@@ -316,7 +316,7 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
 
     # Use the base detector to generate pseudo labels.
 
-    def generate_pseudo_labels(self, point_clouds, mins, maxes, model, threshold_list=None):
+    def generate_pseudo_labels(self, point_clouds, mins, maxes, model, threshold_list=None, return_all_cls_probs=False):
         '''
             inputs = {
             "point_clouds": batch_data_label["point_clouds"],
@@ -355,7 +355,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
                 point_cloud=batch_data_label["point_clouds"],
                 config_dict=self.ap_config_dict,
                 use_cls_threshold=self.use_cls_threshold,
-                threshold_list=threshold_list
+                threshold_list=threshold_list,
+                return_all_cls_probs=return_all_cls_probs,
             )
 
         # convert to __getitem__ output format
@@ -463,25 +464,28 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             self.dataset_config.num_base_class]
         self.dynamic_base_pseudo_thresholds_list = SCANNET_BASE_PSEUDO_THRESHOLDS[
             self.dataset_config.num_base_class]
+        
+    def update_dynamic_base_pseudo_thresholds_list(self, p_class):
+        self.dynamic_base_pseudo_thresholds_list = p_class
 
-    def update_dynamic_base_pseudo_thresholds_list(self, tau=1, phi=None):
-        # tau is a float between 0 and 1.
-        # phi is a list of length self.dataset_config.num_base_class.
-        # phi[i] is a float between 0 and 1.
-        # The new threshold for class i is tau * self.dynamic_base_pseudo_thresholds_list[i] + (1 - tau) * phi[i]*self.dynamic_base_pseudo_thresholds_list[i]
+    # def update_dynamic_base_pseudo_thresholds_list(self, tau=1, phi=None):
+    #     # tau is a float between 0 and 1.
+    #     # phi is a list of length self.dataset_config.num_base_class.
+    #     # phi[i] is a float between 0 and 1.
+    #     # The new threshold for class i is tau * self.dynamic_base_pseudo_thresholds_list[i] + (1 - tau) * phi[i]*self.dynamic_base_pseudo_thresholds_list[i]
 
-        if phi is None:
-            print('phi is None. No update is performed.')
-            return
-        else:
-            for i in range(self.dataset_config.num_base_class):
-                self.dynamic_base_pseudo_thresholds_list[i] = tau * \
-                    self.dynamic_base_pseudo_thresholds_list[i] + \
-                    (1 - tau) * phi[i] * \
-                    self.dynamic_base_pseudo_thresholds_list[i]
-            # crop the threshold to be between 1/num_base_class and 0.95
-            self.dynamic_base_pseudo_thresholds_list = [
-                min(0.95, max(1 / self.dataset_config.num_base_class, x)) for x in self.dynamic_base_pseudo_thresholds_list]
+    #     if phi is None:
+    #         print('phi is None. No update is performed.')
+    #         return
+    #     else:
+    #         for i in range(self.dataset_config.num_base_class):
+    #             self.dynamic_base_pseudo_thresholds_list[i] = tau * \
+    #                 self.dynamic_base_pseudo_thresholds_list[i] + \
+    #                 (1 - tau) * phi[i] * \
+    #                 self.dynamic_base_pseudo_thresholds_list[i]
+    #         # crop the threshold to be between 1/num_base_class and 0.95
+    #         self.dynamic_base_pseudo_thresholds_list = [
+    #             min(0.95, max(1 / self.dataset_config.num_base_class, x)) for x in self.dynamic_base_pseudo_thresholds_list]
 
     def __len__(self):
         return len(self.scan_names)
@@ -559,6 +563,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             threshold_list=self.static_base_pseudo_thresholds_list
         )
 
+        arr_of_cls_dynamic = -1 * np.ones(MAX_NUM_OBJ)
+        arr_of_prob_dynamic = -1 * np.ones((MAX_NUM_OBJ, self.dataset_config.num_base_class))
         # if use_ema_pseudo_label, get pseudo labels from ema detector and append to pseudo_labels
         if self.use_ema_pseudo_label:
             ema_pseudo_labels = self.generate_pseudo_labels(
@@ -566,8 +572,15 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
                 ema_point_cloud.min(axis=0)[:3],
                 ema_point_cloud.max(axis=0)[:3],
                 self.ema_detector,
-                threshold_list=self.dynamic_base_pseudo_thresholds_list
+                threshold_list=self.dynamic_base_pseudo_thresholds_list,
+                return_all_cls_probs = True
             )
+
+            # update list_of_cls_probs
+            for i in range(len(ema_pseudo_labels[0])):
+                if i < arr_of_cls_dynamic.shape[0]:
+                    arr_of_cls_dynamic[i] = ema_pseudo_labels[0][i][0]
+                    arr_of_prob_dynamic[i] = ema_pseudo_labels[0][i][3][:self.dataset_config.num_base_class]
             # map class using nyu40id2class in instance_bboxes
             for i in range(len(instance_bboxes)):
                 instance_bboxes[i][6] = self.dataset_config.nyu40id2class[instance_bboxes[i][6]]
@@ -841,7 +854,9 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         ret_dict['no_base_obj'] = no_base_obj
         ret_dict['no_obj'] = no_obj  # np.array(no_obj).astype(np.int64)
         # ret_dict['scan_name'] = scan_name
+        ret_dict['arr_of_cls_dynamic'] = arr_of_cls_dynamic
+        ret_dict['arr_of_prob_dynamic'] = arr_of_prob_dynamic
 
-        return ret_dict
+        return ret_dict # 
 
 # TODO add testing code below

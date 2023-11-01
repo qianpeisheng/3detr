@@ -49,6 +49,11 @@ SCANNET_BASE_PSEUDO_THRESHOLDS = {
     17: SCANNET_17_1_BASE_PSEUDO_THRESHOLDS,
 }
 
+TRAIN_SET_COUNTS = {
+    9:{8: 1747, 4: 3948, 0: 107, 3: 1240, 7: 515, 1: 295, 5: 196, 6: 261, 2: 262},
+    14:{8: 1749, 9: 1813, 4: 3974, 0: 105, 13: 355, 3: 1243, 12: 111, 10: 521, 7: 513, 1: 291, 11: 167, 5: 199, 6: 257, 2: 266},
+    17:{8: 1749, 9: 1813, 4: 3974, 0: 105, 13: 355, 3: 1243, 12: 111, 10: 521, 7: 513, 1: 291, 11: 167, 5: 199, 6: 257, 2: 266} # TODO update for 17
+}
 
 class ScannetDatasetConfig_Pseudo_2_source_EMA(object):
     def __init__(self, num_base_class=NUM_CLASS_BASE, num_novel_class=NUM_CLASS_INCREMENTAL):
@@ -248,6 +253,14 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         self.use_cls_threshold = use_cls_threshold
         self.use_ema_pseudo_label = use_ema_pseudo_label
         self.nms_threshold = nms_threshold
+        
+        # to scale changes in the dynamic threshold
+        self.train_set_counts = TRAIN_SET_COUNTS[dataset_config.num_base_class]
+        self.train_set_counts_total = sum(self.train_set_counts.values())
+
+        # compute ratios, note that train_set_counts is a dictionary and its values are NOT ordered.
+        self.train_set_count_ratios = np.array([self.train_set_counts[_i] / self.train_set_counts_total for _i in range(dataset_config.num_base_class)])
+
         if self.nms_threshold > 0.999:
             print(
                 'Warning: No NMS is used to combine static and dynamic teacher pseudo labels.')
@@ -685,6 +698,15 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
 
         # Convert the pseudo labels to the format of instance_bboxes
         converted_instance_bboxes = []
+        # check if the length of pseudo_labels[0] is smaller than MAX_NUM_OBJ
+        # if not, select the MAX_NUM_OBJ pseudo labels with the highest probability
+        if len(pseudo_labels[0]) > MAX_NUM_OBJ:
+            print(f'Warning: pseudo_labels[0] has {len(pseudo_labels[0])} labels, select {MAX_NUM_OBJ} with highest probability')
+            # sort pseudo_labels[0] by probability
+            pseudo_labels[0].sort(key=lambda x: x[2], reverse=True)
+            # select the first MAX_NUM_OBJ pseudo labels
+            pseudo_labels[0] = pseudo_labels[0][0:MAX_NUM_OBJ]
+
         for pseudo_label in pseudo_labels[0]:
             converted_instance_bboxes.append(
                 self.pseudo_label_to_instance_bbox(pseudo_label))
@@ -698,9 +720,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         if len(converted_instance_bboxes) > max_converted_instance_bboxes_num:
             print(
                 'Warning: converted_instance_bboxes is more than MAX_NUM_OBJ - the number of instance_bboxes')
-            converted_instance_bboxes = converted_instance_bboxes[0:
-                                                                  max_converted_instance_bboxes_num]
-
+            # converted_instance_bboxes = converted_instance_bboxes[0:
+            #                                                       max_converted_instance_bboxes_num]
         # concat converted_instance_bboxes and instance_bboxes
         converted_instance_bboxes_no_cls = [
             converted_instance_bbox[0:6] for converted_instance_bbox in converted_instance_bboxes]

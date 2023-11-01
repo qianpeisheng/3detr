@@ -143,9 +143,14 @@ def train_one_epoch(
 
             # update p_class
             # change -1 to 0 in arr_of_prob_dynamic
+            # arr_of_prob_dynamic[arr_of_prob_dynamic < 0] = 0
             arr_of_prob_dynamic[arr_of_prob_dynamic < 0] = 0
             # sum over all batches and proposals for each class
-            sum_prob_dynamic = np.sum(arr_of_prob_dynamic, axis=(0, 1)) # shape [num_class]
+            sum_prob_dynamic = np.sum(arr_of_prob_dynamic, axis=(0, 1)) # shape [num_class], equation (6) in the paper.
+            # This assumes that the number of proposals for each class is the same, which is not true.
+
+            # so weight sum_prob_dynamic by ratios of count of each class divided by total count, which are known and saved in dataset_train
+            sum_prob_dynamic /= dataset_train.train_set_count_ratios # TODO check if the magnitude works
             # normalize by sum_count
             sum_prob_dynamic = sum_prob_dynamic / sum_count
 

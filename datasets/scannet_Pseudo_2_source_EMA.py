@@ -23,7 +23,7 @@ from utils.box_util import (flip_axis_to_camera_np, flip_axis_to_camera_tensor,
                             get_3d_box_batch_np, get_3d_box_batch_tensor)
 from utils.pc_util import scale_points, shift_scale_points
 from utils.random_cuboid import RandomCuboid
-from utils.ap_calculator import get_ap_config_dict, parse_predictions_SDCoT
+from utils.ap_calculator import get_ap_config_dict, parse_predictions_SDCoT, parse_predictions_SDCoT_dynamic
 from utils.nms import nms_3d_faster_samecls, nms_3d_faster_base_novel
 
 IGNORE_LABEL = -100
@@ -36,12 +36,19 @@ DATASET_METADATA_DIR = "scannet_data/scannet/meta_data"
 NUM_CLASS_BASE = 9  # depending on the base training classes.
 NUM_CLASS_INCREMENTAL = 9  # depending on the incremental training classes.
 
+# SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = np.array([
+#     0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21])
+# SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = np.array([
+#     0.93, 0.95, 0.84, 0.8, 0.73, 0.75, 0.7, 0.82, 0.22, 0.69, 0.85, 0.68, 0.85, 0.85])
+# SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = np.array([
+#     0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21])  # TODO update this
+
 SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = np.array([
-    0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21])
+    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
 SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = np.array([
-    0.93, 0.95, 0.84, 0.8, 0.73, 0.75, 0.7, 0.82, 0.22, 0.69, 0.85, 0.68, 0.85, 0.85])
+    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
 SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = np.array([
-    0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21])  # TODO update this
+    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])  # TODO update this
 
 SCANNET_BASE_PSEUDO_THRESHOLDS = {
     9: SCANNET_9_9_BASE_PSEUDO_THRESHOLDS,
@@ -50,10 +57,11 @@ SCANNET_BASE_PSEUDO_THRESHOLDS = {
 }
 
 TRAIN_SET_COUNTS = {
-    9:{8: 1747, 4: 3948, 0: 107, 3: 1240, 7: 515, 1: 295, 5: 196, 6: 261, 2: 262},
-    14:{8: 1749, 9: 1813, 4: 3974, 0: 105, 13: 355, 3: 1243, 12: 111, 10: 521, 7: 513, 1: 291, 11: 167, 5: 199, 6: 257, 2: 266},
-    17:{8: 1749, 9: 1813, 4: 3974, 0: 105, 13: 355, 3: 1243, 12: 111, 10: 521, 7: 513, 1: 291, 11: 167, 5: 199, 6: 257, 2: 266} # TODO update for 17
+    9: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026},
+    14: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026, 9: 1985, 10: 661, 11: 186, 12: 116, 13: 390},
+    17: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026, 9: 1985, 10: 661, 11: 186, 12: 116, 13: 390, 14: 406, 15: 1271, 16: 201, 17: 928}  # TODO update for 17
 }
+
 
 class ScannetDatasetConfig_Pseudo_2_source_EMA(object):
     def __init__(self, num_base_class=NUM_CLASS_BASE, num_novel_class=NUM_CLASS_INCREMENTAL):
@@ -253,13 +261,14 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         self.use_cls_threshold = use_cls_threshold
         self.use_ema_pseudo_label = use_ema_pseudo_label
         self.nms_threshold = nms_threshold
-        
+
         # to scale changes in the dynamic threshold
         self.train_set_counts = TRAIN_SET_COUNTS[dataset_config.num_base_class]
         self.train_set_counts_total = sum(self.train_set_counts.values())
 
         # compute ratios, note that train_set_counts is a dictionary and its values are NOT ordered.
-        self.train_set_count_ratios = np.array([self.train_set_counts[_i] / self.train_set_counts_total for _i in range(dataset_config.num_base_class)])
+        self.train_set_count_ratios = np.array(
+            [self.train_set_counts[_i] / self.train_set_counts_total for _i in range(dataset_config.num_base_class)])
 
         if self.nms_threshold > 0.999:
             print(
@@ -360,7 +369,21 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
             if isinstance(outputs, list) or isinstance(outputs, tuple):
                 outputs = outputs[0]
             # This is to cater for distillation
-
+        if return_all_cls_probs:
+            # for dynamic teacher
+            parsed_predictions = parse_predictions_SDCoT_dynamic(
+                predicted_boxes=outputs['outputs']['box_corners'],
+                sem_cls_probs=outputs['outputs']['sem_cls_prob'],
+                # for dynamic teacher only
+                sem_cls_logits=outputs['outputs']['sem_cls_logits'],
+                objectness_probs=outputs['outputs']['objectness_prob'],
+                point_cloud=batch_data_label["point_clouds"],
+                config_dict=self.ap_config_dict,
+                use_cls_threshold=self.use_cls_threshold,
+                threshold_list=threshold_list,
+                return_all_cls_probs=return_all_cls_probs,
+            )
+        else:
             parsed_predictions = parse_predictions_SDCoT(
                 predicted_boxes=outputs['outputs']['box_corners'],
                 sem_cls_probs=outputs['outputs']['sem_cls_prob'],
@@ -502,6 +525,7 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
 
     def __len__(self):
         return len(self.scan_names)
+        # return 24 # for debugging
 
     def __getitem__(self, idx):
         scan_name = self.scan_names[idx]
@@ -577,7 +601,13 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         )
 
         arr_of_cls_dynamic = -1 * np.ones(MAX_NUM_OBJ)
-        arr_of_prob_dynamic = -1 * np.ones((MAX_NUM_OBJ, self.dataset_config.num_base_class))
+        # arr_of_logit_dynamic = -1 * np.ones((MAX_NUM_OBJ, self.dataset_config.num_base_class))
+        arr_of_logit_dynamic = np.zeros(
+            (MAX_NUM_OBJ, self.dataset_config.num_base_class))
+        arr_of_prob_dynamic = -1 * \
+            np.ones((MAX_NUM_OBJ, self.dataset_config.num_base_class))
+        # TODO logits range are -inf to inf, so this is not a good initialization because it will not be differentiable.
+
         # if use_ema_pseudo_label, get pseudo labels from ema detector and append to pseudo_labels
         if self.use_ema_pseudo_label:
             ema_pseudo_labels = self.generate_pseudo_labels(
@@ -586,14 +616,17 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
                 ema_point_cloud.max(axis=0)[:3],
                 self.ema_detector,
                 threshold_list=self.dynamic_base_pseudo_thresholds_list,
-                return_all_cls_probs = True
+                return_all_cls_probs=True
             )
 
             # update list_of_cls_probs
             for i in range(len(ema_pseudo_labels[0])):
                 if i < arr_of_cls_dynamic.shape[0]:
                     arr_of_cls_dynamic[i] = ema_pseudo_labels[0][i][0]
-                    arr_of_prob_dynamic[i] = ema_pseudo_labels[0][i][3][:self.dataset_config.num_base_class]
+                    arr_of_logit_dynamic[i] = ema_pseudo_labels[0][i][3][:
+                                                                         self.dataset_config.num_base_class]
+                    arr_of_prob_dynamic[i] = ema_pseudo_labels[0][i][4][:
+                                                                        self.dataset_config.num_base_class]
             # map class using nyu40id2class in instance_bboxes
             for i in range(len(instance_bboxes)):
                 instance_bboxes[i][6] = self.dataset_config.nyu40id2class[instance_bboxes[i][6]]
@@ -701,7 +734,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         # check if the length of pseudo_labels[0] is smaller than MAX_NUM_OBJ
         # if not, select the MAX_NUM_OBJ pseudo labels with the highest probability
         if len(pseudo_labels[0]) > MAX_NUM_OBJ:
-            print(f'Warning: pseudo_labels[0] has {len(pseudo_labels[0])} labels, select {MAX_NUM_OBJ} with highest probability')
+            print(
+                f'Warning: pseudo_labels[0] has {len(pseudo_labels[0])} labels, select {MAX_NUM_OBJ} with highest probability')
             # sort pseudo_labels[0] by probability
             pseudo_labels[0].sort(key=lambda x: x[2], reverse=True)
             # select the first MAX_NUM_OBJ pseudo labels
@@ -876,8 +910,8 @@ class ScannetDetectionDataset_Pseudo_2_source_EMA(Dataset):
         ret_dict['no_obj'] = no_obj  # np.array(no_obj).astype(np.int64)
         # ret_dict['scan_name'] = scan_name
         ret_dict['arr_of_cls_dynamic'] = arr_of_cls_dynamic
+        ret_dict['arr_of_logit_dynamic'] = arr_of_logit_dynamic
         ret_dict['arr_of_prob_dynamic'] = arr_of_prob_dynamic
-
-        return ret_dict #
+        return ret_dict
 
 # TODO add testing code below

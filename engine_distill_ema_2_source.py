@@ -455,8 +455,12 @@ def train_one_epoch(
     # update p_class by multiplying with tau_global
     p_class = p_class * tau_global
 
-    # update p_class in dataset['train']
-    dataset_train.update_dynamic_base_pseudo_thresholds_list(p_class)
+    if args.use_dynamic_thresholds:
+        print('Updating dynamic thresholds...')
+        # update p_class in dataset['train']
+        dataset_train.update_dynamic_base_pseudo_thresholds_list(p_class)
+    else:
+        print('Not updating dynamic thresholds...')
 
     if curr_iter % args.log_metrics_every == 0:
         logger.log_scalars({'tau_global': tau_global},

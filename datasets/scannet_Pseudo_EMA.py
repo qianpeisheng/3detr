@@ -35,6 +35,25 @@ DATASET_METADATA_DIR = "scannet_data/scannet/meta_data"
 NUM_CLASS_BASE = 9  # depending on the base training classes.
 NUM_CLASS_INCREMENTAL = 9  # depending on the incremental training classes.
 
+SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = np.array([
+    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
+SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = np.array([
+    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
+SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = np.array([
+    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])  # TODO update this
+
+SCANNET_BASE_PSEUDO_THRESHOLDS = {
+    9: SCANNET_9_9_BASE_PSEUDO_THRESHOLDS,
+    14: SCANNET_14_4_BASE_PSEUDO_THRESHOLDS,
+    17: SCANNET_17_1_BASE_PSEUDO_THRESHOLDS,
+}
+
+TRAIN_SET_COUNTS = {
+    9: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026},
+    14: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026, 9: 1985, 10: 661, 11: 186, 12: 116, 13: 390},
+    17: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026, 9: 1985, 10: 661, 11: 186, 12: 116, 13: 390, 14: 406, 15: 1271, 16: 201, 17: 928}  # TODO update for 17
+}
+
 
 class ScannetDatasetConfig_Pseudo_EMA(object):
     def __init__(self, num_base_class=NUM_CLASS_BASE, num_novel_class=NUM_CLASS_INCREMENTAL):
@@ -103,7 +122,7 @@ class ScannetDatasetConfig_Pseudo_EMA(object):
         )
 
         # select only the novel classes
-        self.nyu40ids_novel = self.nyu40ids[self.num_base_class:]
+        self.nyu40ids_novel = self.nyu40ids[self.num_base_class:self.num_base_class+ self.num_novel_class] # set the end in case they do not add up to 18
 
         # select only self.num_semcls classes
         self.nyu40ids = self.nyu40ids[: self.num_semcls]
@@ -292,7 +311,7 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
         self.ema_detector = ema_detector
 
     # Use the base detector to generate pseudo labels.
-    def generate_pseudo_labels(self, point_clouds, mins, maxes, model, use_cls_threshold=True):
+    def generate_pseudo_labels(self, point_clouds, mins, maxes, model, threshold_list=None, use_cls_threshold=True):
         '''
             inputs = {
             "point_clouds": batch_data_label["point_clouds"],
@@ -329,6 +348,7 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
                 objectness_probs=outputs['outputs']['objectness_prob'],
                 point_cloud=batch_data_label["point_clouds"],
                 config_dict=self.ap_config_dict,
+                threshold_list=threshold_list,
                 use_cls_threshold=use_cls_threshold,
             )
 
@@ -362,6 +382,12 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
 
     def set_ap_config_dict(self, ap_config_dict):
         self.ap_config_dict = ap_config_dict
+
+    def set_cls_threshold(self):
+        self.static_base_pseudo_thresholds_list = SCANNET_BASE_PSEUDO_THRESHOLDS[
+            self.dataset_config.num_base_class]
+        self.dynamic_base_pseudo_thresholds_list = SCANNET_BASE_PSEUDO_THRESHOLDS[
+            self.dataset_config.num_base_class]
 
     def __len__(self):
         return len(self.scan_names)
@@ -430,11 +456,12 @@ class ScannetDetectionDataset_Pseudo_EMA(Dataset):
 
         # to obtain pseudo labels
         pseudo_labels = self.generate_pseudo_labels(
-            point_cloud,
-            point_cloud.min(axis=0)[:3],
-            point_cloud.max(axis=0)[:3],
-            self.base_detector,
-            self.use_cls_threshold
+            point_clouds = point_cloud,
+            mins = point_cloud.min(axis=0)[:3],
+            maxes = point_cloud.max(axis=0)[:3],
+            model = self.base_detector,
+            use_cls_threshold = self.use_cls_threshold,
+            threshold_list = self.static_base_pseudo_thresholds_list
         )
 
         # if use_ema_pseudo_label, get pseudo labels from ema detector and append to pseudo_labels

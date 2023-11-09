@@ -130,7 +130,7 @@ class ScannetDatasetConfig_Pseudo_2_source_EMA(object):
         )
 
         # select only the novel classes
-        self.nyu40ids_novel = self.nyu40ids[self.num_base_class:]
+        self.nyu40ids_novel = self.nyu40ids[self.num_base_class:self.num_semcls] # note that self.num_semcls may not be 18
 
         # select only self.num_semcls classes
         self.nyu40ids = self.nyu40ids[: self.num_semcls]

@@ -434,8 +434,8 @@ def train_one_epoch(
         barrier()
 
     # update tau_global and p_class
-    tau_global = args.ema_decay * tau_global + \
-        (1 - args.ema_decay) * np.sum(max_prob_dynamic_list) / sum_count
+    tau_global = args.ema_decay_dt * tau_global + \
+        (1 - args.ema_decay_dt) * np.sum(max_prob_dynamic_list) / sum_count
     # update p_class
     # epoch_balanced_softmax_list is a list of tensors of shape [num_object, num_class]
     # combine into a tensor
@@ -448,7 +448,7 @@ def train_one_epoch(
     # to np
     sum_prob_dynamic = sum_prob_dynamic.cpu().numpy()
     # update p_class
-    p_class = args.ema_decay * p_class + (1 - args.ema_decay) * sum_prob_dynamic
+    p_class = args.ema_decay_dt * p_class + (1 - args.ema_decay_dt) * sum_prob_dynamic
     # normalize p_class by max value
     p_class = p_class / np.max(p_class)
 

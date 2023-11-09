@@ -147,6 +147,8 @@ def make_args_parser():
                         help='use consistency loss with given weight')
     parser.add_argument('--ema_decay', type=float,
                         default=0.999, help='ema variable decay rate')
+    parser.add_argument('--ema_decay_dt', type=float,
+                        default=0.99, help='ema variable decay rate')
     parser.add_argument('--consistency_ramp_len', type=int,
                         default=100, help='length of the consistency loss ramp-up')
 

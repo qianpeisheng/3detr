@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copyright (c) Facebook, Inc. and its affiliates.
 
-CUDA_VISIBLE_DEVICES=3 python3 main_SDCoT_pseudo_2_source_distill_ema_free_match_new.py \
+CUDA_VISIBLE_DEVICES=1 python3 main_SDCoT_pseudo_2_source_distill_ema_free_match_new.py \
 --dataset_name scannet \
 --model_name 3detr_distill \
 --num_base_class 14 \

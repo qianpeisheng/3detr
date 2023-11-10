@@ -161,7 +161,7 @@ def make_args_parser():
     # Pseudo label specific args
     parser.add_argument("--use_cls_threshold", default=False, action="store_true",
                         help='use cls specific threshold to filter out low confidence predictions')
-    parser.add_argument("--use_dynamic_threshold", default=False, action="store_true",
+    parser.add_argument("--use_dynamic_thresholds", default=False, action="store_true",
                         help='use dynamic cls specific threshold for baes class predictions in the dynamic teachers prediction in the train set')
     # parser.add_argument("--dynamic_div_by", required=True, type=str, choices=[
     #                     "first", "last"], help='first means divide by the number of objects in the first epoch, last means divide by the number of objects in the last epoch')

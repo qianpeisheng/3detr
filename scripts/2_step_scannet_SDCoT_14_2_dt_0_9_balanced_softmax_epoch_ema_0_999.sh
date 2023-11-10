@@ -28,7 +28,7 @@ CUDA_VISIBLE_DEVICES=0 python3 main_SDCoT_pseudo_2_source_distill_ema_free_match
 --use_ema_pseudo_label \
 --ema_nms_threshold 0.5 \
 --use_cls_threshold \
---use_dynamic_threshold \
+--use_dynamic_thresholds \
 --dynamic_div_by last \
 --ema_decay_dt 0.999 \
 --checkpoint_dir ckpts_scannet/2_step_scannet_SDCoT_14_2_dt_0_9_balanced_softmax_epoch_ema_0_999 \

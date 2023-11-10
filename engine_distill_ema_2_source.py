@@ -56,6 +56,27 @@ def adjust_learning_rate(args, optimizer, curr_epoch):
     return curr_lr
 
 
+TRAIN_SET_COUNTS = {
+    9: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026},
+    14: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026, 9: 1985, 10: 661, 11: 186, 12: 116, 13: 390},
+    17: {0: 113, 1: 307, 2: 300, 3: 1427, 4: 4357, 5: 216, 6: 292, 7: 551, 8: 2026, 9: 1985, 10: 661, 11: 186, 12: 116, 13: 390, 14: 406, 15: 1271, 16: 201, 17: 928}  # TODO update for 17
+}
+
+
+def balanced_softmax(logits, counts_log):
+    # counts is a list of counts for each class
+    # counts_sum is the sum of counts
+    # logits is a tensor of logits of shape (num_class, )
+    # Refer to implementation at https://github.com/jiawei-ren/BalancedMetaSoftmax-Classification/blob/main/loss/BalancedSoftmaxLoss.py
+
+    logits_add_log_counts = logits + counts_log
+    softmax_logits_add_log_counts = torch.nn.functional.softmax(
+        torch.tensor(logits_add_log_counts), dim=0)
+    # no need gradient
+    softmax_logits_add_log_counts = softmax_logits_add_log_counts.detach()
+    return softmax_logits_add_log_counts
+
+
 def train_one_epoch(
     args,
     curr_epoch,
@@ -75,6 +96,10 @@ def train_one_epoch(
     p_class is a list of float numbers, each of which is the threshold for each class. The size of p_class is num_base_class.
     '''
 
+    train_count_dict = TRAIN_SET_COUNTS[dataset_train.dataset_config.num_base_class]
+    counts_list = [train_count_dict[i]
+                   for i in range(dataset_train.dataset_config.num_base_class)]
+    counts_log = np.log(counts_list)
     ap_calculator = APCalculator(
         dataset_config=dataset_config,
         ap_iou_thresh=[0.25, 0.5],
@@ -120,53 +145,86 @@ def train_one_epoch(
     num_no_obj = 0
     num_no_base_obj = 0
 
+    # move threshold updates outside the loop, i.e., update tau_global and p_class only once per epoch
+    sum_count = 0
+    max_prob_dynamic_list = []
+    epoch_balanced_softmax_list = []
     for batch_idx, batch_data_label in enumerate(dataset_loader):
-        arr_of_cls_dynamic = batch_data_label['arr_of_cls_dynamic'] # a numpy array of shape [B, N]
-        unique_elements, counts = np.unique(arr_of_cls_dynamic, return_counts=True)
-        sum_count = 0
+        # a numpy array of shape [B, N]
+        arr_of_cls_dynamic = batch_data_label['arr_of_cls_dynamic']
+        unique_elements, counts = np.unique(
+            arr_of_cls_dynamic, return_counts=True)
         for index, count in zip(unique_elements, counts):
             if index < 0:
                 continue
             else:
                 sum_count += count
-        
 
-        arr_of_prob_dynamic = batch_data_label['arr_of_prob_dynamic'].cpu().numpy() # numpy array of shape [B, N, num_class]
+        # numpy array of shape [B, N, num_class]
+        arr_of_logit_dynamic = batch_data_label['arr_of_logit_dynamic'].cpu(
+        ).numpy()
+        # numpy array of shape [B, N, num_class]
+        arr_of_prob_dynamic = batch_data_label['arr_of_prob_dynamic'].cpu(
+        ).numpy()
+
         # get max prob for each proposal, shape [B, N]
         max_prob_dynamic = np.max(arr_of_prob_dynamic, axis=2)
         # change -1 to 0 in max_prob_dynamic
         max_prob_dynamic[max_prob_dynamic < 0] = 0
+        # append max_prob_dynamic to max_prob_dynamic_list
+        max_prob_dynamic_list.append(np.sum(max_prob_dynamic))
 
         if sum_count > 0:
             # update tau_global
-            tau_global = args.ema_decay * tau_global + (1 - args.ema_decay) * np.sum(max_prob_dynamic) / sum_count
-
+            # tau_global = args.ema_decay * tau_global + (1 - args.ema_decay) * np.sum(max_prob_dynamic) / sum_count
             # update p_class
-            # change -1 to 0 in arr_of_prob_dynamic
-            # arr_of_prob_dynamic[arr_of_prob_dynamic < 0] = 0
-            arr_of_prob_dynamic[arr_of_prob_dynamic < 0] = 0
+
+            # loop through arr_of_logit_dynamic of shape [B, N, num_class] along B and N
+            # if the arr_of_logit_dynamic[i, j] are not all 0, compute balanced_softmax(logits, counts_log), else skip
+            combined_balanced_softmax = []
+            for i in range(arr_of_logit_dynamic.shape[0]):
+                for j in range(arr_of_logit_dynamic.shape[1]):
+                    if np.all(arr_of_logit_dynamic[i, j] == 0):
+                        continue
+                    else:
+                        # compute balanced_softmax(logits, counts_log)
+                        balanced_softmax_logits = balanced_softmax(
+                            arr_of_logit_dynamic[i, j], counts_log)
+                        combined_balanced_softmax.append(
+                            balanced_softmax_logits)
+
+            # convert a list of tensors to a tensor
+            combined_balanced_softmax = torch.stack(
+                combined_balanced_softmax, dim=0)
+
+            # append combined_balanced_softmax to epoch_balanced_softmax_list
+            epoch_balanced_softmax_list.append(combined_balanced_softmax)
+
+            # change -1 to 0 in arr_of_logit_dynamic
+            # arr_of_logit_dynamic[arr_of_logit_dynamic < 0] = 0
+            # arr_of_logit_dynamic[arr_of_logit_dynamic < 0] = 0
+
             # sum over all batches and proposals for each class
-            sum_prob_dynamic = np.sum(arr_of_prob_dynamic, axis=(0, 1)) # shape [num_class], equation (6) in the paper.
+            # sum_prob_dynamic = np.sum(arr_of_logit_dynamic, axis=(0, 1)) # shape [num_class], equation (6) in the paper.
             # This assumes that the number of proposals for each class is the same, which is not true.
 
             # so weight sum_prob_dynamic by ratios of count of each class divided by total count, which are known and saved in dataset_train
-            sum_prob_dynamic /= dataset_train.train_set_count_ratios # TODO check if the magnitude works
+            # sum_prob_dynamic /= dataset_train.train_set_count_ratios # TODO check if the magnitude works
             # normalize by sum_count
-            sum_prob_dynamic = sum_prob_dynamic / sum_count
+            # sum_prob_dynamic = sum_prob_dynamic / sum_count
 
             # update p_class
-            p_class = args.ema_decay * p_class + (1 - args.ema_decay) * sum_prob_dynamic
+            # p_class = args.ema_decay * p_class + (1 - args.ema_decay) * sum_prob_dynamic
 
             # p_class = [args.ema_decay * p_class[i] + (1 - args.ema_decay) * sum_prob_dynamic[i] for i in range(dataset_config.num_base_class)]
             # normalize p_class by max value
-            p_class = p_class / np.max(p_class)
+            # p_class = p_class / np.max(p_class)
 
             # update p_class by multiplying with tau_global
-            p_class = p_class * tau_global
+            # p_class = p_class * tau_global
 
             # update p_class in dataset['train']
-            dataset_train.update_dynamic_base_pseudo_thresholds_list(p_class)
-
+            # dataset_train.update_dynamic_base_pseudo_thresholds_list(p_class)
 
         else:
             print('sum_count is 0!')
@@ -185,9 +243,11 @@ def train_one_epoch(
         # scan_names_no_base_obj = [scan_names[i] for i in range(
         #     len(scan_names)) if batch_data_label['no_base_obj'][i] == 1]
         # log scan_names_no_obj
-        num_no_obj += sum(batch_data_label['no_obj']) #torch.sum(batch_data_label['no_obj'])
-        num_no_base_obj += sum(batch_data_label['no_base_obj']) # torch.sum(batch_data_label['no_base_obj'])
-            
+        # torch.sum(batch_data_label['no_obj'])
+        num_no_obj += sum(batch_data_label['no_obj'])
+        # torch.sum(batch_data_label['no_base_obj'])
+        num_no_base_obj += sum(batch_data_label['no_base_obj'])
+
         #     logger.log_scalars(
         #         {'scan_names_no_obj': scan_names_no_obj}, curr_iter, prefix="Train_details/")
         # # log scan_names_no_base_obj
@@ -202,7 +262,7 @@ def train_one_epoch(
         }
         outputs, query_xyz, pos_embed, enc_inds, interim_inds, *_ = model(
             inputs)
-        
+
         # base_cls_probs = outputs['outputs']['sem_cls_prob'][...,:dataset_config.num_base_class]
         # # base_cls_probs has shape [B, N, num_base_class]
         # max_base_cls_probs, _ = torch.max(base_cls_probs, dim=2) # shape [B, N]
@@ -224,7 +284,7 @@ def train_one_epoch(
         # # avg
         # avg_base_cls_probs = torch.mean(base_cls_probs, dim=1) # shape [B, num_base_class]
         # avg_base_cls_probs = torch.mean(avg_base_cls_probs, dim=0) # shape [num_base_class]
-        
+
         # # normalize by max avg
         # avg_base_cls_probs_norm = avg_base_cls_probs / torch.max(avg_base_cls_probs)
 
@@ -304,12 +364,15 @@ def train_one_epoch(
             # If GPU memory is not an issue, uncomment the following lines.
             # outputs["outputs"] = all_gather_dict(outputs["outputs"])
             # batch_data_label = all_gather_dict(batch_data_label)
-            batch_pred_map_cls, batch_gt_map_cls = ap_calculator.step_meter(outputs, batch_data_label)
-            logger.log_scalars({'tau_global': tau_global}, curr_iter, prefix="Train_details/")
-            for idx, phi in enumerate(p_class):
-                logger.log_scalars({f'phi_{idx}': float(phi)}, curr_iter, prefix="Train/")
-            print(
-                f"Iter {curr_iter}; Tau {tau_global:.4f}; Phi {[f'{_phi:.4f}' for _phi in p_class]}")
+            batch_pred_map_cls, batch_gt_map_cls = ap_calculator.step_meter(
+                outputs, batch_data_label)
+            # logger.log_scalars({'tau_global': tau_global},
+            #                    curr_iter, prefix="Train_details/")
+            # for idx, phi in enumerate(p_class):
+            #     logger.log_scalars({f'phi_{idx}': float(phi)},
+            #                        curr_iter, prefix="Train/")
+            # print(
+            #     f"Iter {curr_iter}; Tau {tau_global:.4f}; Phi {[f'{_phi:.4f}' for _phi in p_class]}")
         time_delta.update(time.time() - curr_time)
         loss_avg.update(loss_reduced.item())
 
@@ -369,6 +432,44 @@ def train_one_epoch(
         # Update EMA model
         update_ema_variables(model, ema_model, args.ema_decay, curr_iter)
         barrier()
+
+    # update tau_global and p_class
+    tau_global = args.ema_decay_dt * tau_global + \
+        (1 - args.ema_decay_dt) * np.sum(max_prob_dynamic_list) / sum_count
+    # update p_class
+    # epoch_balanced_softmax_list is a list of tensors of shape [num_object, num_class]
+    # combine into a tensor
+    epoch_balanced_softmax = torch.cat(
+        epoch_balanced_softmax_list, dim=0)  # shape [num_object, num_class]
+    # sum over all objects for each class
+    sum_prob_dynamic = torch.sum(epoch_balanced_softmax, dim=0)
+    # normalize by sum_count
+    sum_prob_dynamic = sum_prob_dynamic / sum_count
+    # to np
+    sum_prob_dynamic = sum_prob_dynamic.cpu().numpy()
+    # update p_class
+    p_class = args.ema_decay_dt * p_class + (1 - args.ema_decay_dt) * sum_prob_dynamic
+    # normalize p_class by max value
+    p_class = p_class / np.max(p_class)
+
+    # update p_class by multiplying with tau_global
+    p_class = p_class * tau_global
+
+    if args.use_dynamic_thresholds:
+        print('Updating dynamic thresholds...')
+        # update p_class in dataset['train']
+        dataset_train.update_dynamic_base_pseudo_thresholds_list(p_class)
+    else:
+        print('Not updating dynamic thresholds...')
+
+    if curr_iter % args.log_metrics_every == 0:
+        logger.log_scalars({'tau_global': tau_global},
+                           curr_iter, prefix="Dynamic_Threshold/")
+        for idx, phi in enumerate(p_class):
+            logger.log_scalars({f'phi_{idx}': float(phi)},
+                               curr_iter, prefix="Dynamic_Threshold/")
+        print(
+            f"Iter {curr_iter}; Tau {tau_global:.4f}; Phi {[f'{_phi:.4f}' for _phi in p_class]}")
 
     return ap_calculator, tau_global, p_class
     # average the avg_pred_prob_list

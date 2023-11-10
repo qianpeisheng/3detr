@@ -149,7 +149,7 @@ def make_args_parser():
                         default=0.999, help='ema variable decay rate')
     parser.add_argument('--consistency_ramp_len', type=int,
                         default=100, help='length of the consistency loss ramp-up')
-    
+
     # Pseudo label specific args
     parser.add_argument("--use_cls_threshold", default=False, action="store_true", help='use cls specific threshold to filter out low confidence predictions')
 
@@ -515,6 +515,9 @@ def main(local_rank, args):
     )
     # set set_ap_config_dict
     datasets['train'].set_ap_config_dict(ap_config_dict)
+
+    # set cls threshold for the train set
+    datasets['train'].set_cls_threshold()
 
     model, _ = build_model(args, dataset_config_train)
     model = model.cuda(local_rank)

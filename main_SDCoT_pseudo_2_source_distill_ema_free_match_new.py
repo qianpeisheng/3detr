@@ -147,6 +147,8 @@ def make_args_parser():
                         help='use consistency loss with given weight')
     parser.add_argument('--ema_decay', type=float,
                         default=0.999, help='ema variable decay rate')
+    parser.add_argument('--ema_decay_dt', type=float,
+                        default=0.99, help='ema variable decay rate')
     parser.add_argument('--consistency_ramp_len', type=int,
                         default=100, help='length of the consistency loss ramp-up')
 
@@ -159,10 +161,10 @@ def make_args_parser():
     # Pseudo label specific args
     parser.add_argument("--use_cls_threshold", default=False, action="store_true",
                         help='use cls specific threshold to filter out low confidence predictions')
-    parser.add_argument("--use_dynamic_threshold", default=False, action="store_true",
+    parser.add_argument("--use_dynamic_thresholds", default=False, action="store_true",
                         help='use dynamic cls specific threshold for baes class predictions in the dynamic teachers prediction in the train set')
-    parser.add_argument("--dynamic_div_by", required=True, type=str, choices=[
-                        "first", "last"], help='first means divide by the number of objects in the first epoch, last means divide by the number of objects in the last epoch')
+    # parser.add_argument("--dynamic_div_by", required=True, type=str, choices=[
+    #                     "first", "last"], help='first means divide by the number of objects in the first epoch, last means divide by the number of objects in the last epoch')
 
     ##### Training #####
     parser.add_argument("--start_epoch", default=-1, type=int)
@@ -189,8 +191,10 @@ def make_args_parser():
 
     return parser
 
+
 def get_max_prob(pred_logits):
     return
+
 
 def do_train(
     args,
@@ -230,7 +234,8 @@ def do_train(
 
     logger = Logger(args.checkpoint_dir)
 
-    tau_global = 1. # with hand picked class thresholds, tau_global initially should be 1
+    tau_global = 0.9  # with hand picked class thresholds, tau_global initially should be 1
+    # with balanced softmax, tau_global initially should be 0.9
     # phi_list is a list of 1s with length num_base_class
     # p_class = np.array([0.9 for _ in range(args.num_base_class)])
     p_class = dataset_train.dynamic_base_pseudo_thresholds_list
@@ -332,15 +337,15 @@ def do_train(
         #     # log tau and phi, when print phi_list print up to 4 decimal places
         #     print(
         #         f"Epoch {epoch}; Tau {tau_global:.4f}; Phi {[f'{_phi:.4f}' for _phi in p_class]}")
-            # print(number_counts_pred_all_epochs[-1])
-            # tau_global_epoch change to float
-            # tau_global_epoch = float(tau_global_epoch)
-            # logger.log_scalars({'tau': tau_global_epoch},
-            #                    epoch, prefix="Train/")
+        # print(number_counts_pred_all_epochs[-1])
+        # tau_global_epoch change to float
+        # tau_global_epoch = float(tau_global_epoch)
+        # logger.log_scalars({'tau': tau_global_epoch},
+        #                    epoch, prefix="Train/")
 
-            # for idx, phi in enumerate(phi_list):
-            #     logger.log_scalars(
-            #         {f'phi_{idx}': float(phi)}, epoch, prefix="Train/")
+        # for idx, phi in enumerate(phi_list):
+        #     logger.log_scalars(
+        #         {f'phi_{idx}': float(phi)}, epoch, prefix="Train/")
 
         # not using per class to save space
         metric_str = aps.metrics_to_str(metrics, per_class=False)

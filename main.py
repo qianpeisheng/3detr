@@ -308,6 +308,7 @@ def test_model(args, model, model_no_ddp, criterion, dataset_config, dataloaders
         sys.exit(1)
 
     sd = torch.load(args.test_ckpt, map_location=torch.device("cpu"))
+
     model_no_ddp.load_state_dict(sd["model"])
     logger = Logger()
     criterion = None  # do not compute loss for speed-up; Comment out to see test loss

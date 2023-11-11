@@ -40,15 +40,16 @@ MEAN_COLOR_RGB = np.array([0.5, 0.5, 0.5])  # sunrgbd color is in 0~1
 DATA_PATH_V1 = "sunrgbd_data/sunrgbd/sunrgbd_v1_pc_bbox_50k" ## Replace with path to dataset
 DATA_PATH_V2 = "" ## Not used in the codebase.
 
+NUM_CLASS = 5
 
-class SunrgbdDatasetConfig(object):
-    def __init__(self):
-        self.num_semcls = 10
+class SunrgbdDatasetConfig_base(object):
+    def __init__(self, num_base_class=NUM_CLASS):
+        self.num_semcls = num_base_class
         self.num_angle_bin = 12
         self.max_num_obj = 64
 
         # Our data is in SDCoT order.
-        self.type2class_SDCoT = {
+        self.type2class = {
             "bathtub": 0,
             "bed": 1,
             "bookshelf": 2,
@@ -61,29 +62,38 @@ class SunrgbdDatasetConfig(object):
             "toilet": 9,
         }
 
-        self.class2type_SDCoT = {self.type2class_SDCoT[t]: t for t in self.type2class_SDCoT}
+        # select only self.num_semcls classes
+        self.type2class = {
+            k: self.type2class[k] for k in list(self.type2class)[: self.num_semcls]
+        }
+        # note that dictionaries are ordered in Python 3.7+
+
+        self.class2type = {self.type2class[t]: t for t in self.type2class}
+        # check that the size of the dictionary is correct
+        assert len(self.type2class) == self.num_semcls
 
         # 3DETR order
 
-        self.type2class = {
-            "bed": 0,
-            "table": 1,
-            "sofa": 2,
-            "chair": 3,
-            "toilet": 4,
-            "desk": 5,
-            "dresser": 6,
-            "night_stand": 7,
-            "bookshelf": 8,
-            "bathtub": 9,
-        }
+        # self.type2class = {
+        #     "bed": 0,
+        #     "table": 1,
+        #     "sofa": 2,
+        #     "chair": 3,
+        #     "toilet": 4,
+        #     "desk": 5,
+        #     "dresser": 6,
+        #     "night_stand": 7,
+        #     "bookshelf": 8,
+        #     "bathtub": 9,
+        # }
 
         self.class2type = {self.type2class[t]: t for t in self.type2class}
+        self.base_cls_inds = np.array(list(self.class2type.keys()))
 
         # map type (int) in SDCoT to type (int) in 3DETR
-        self.type2type = {
-            self.type2class_SDCoT[t]: self.type2class[t] for t in self.type2class
-        }
+        # self.type2type = {
+        #     self.type2class[t]: self.type2class[t] for t in self.type2class
+        # }
 
         # not used
         # self.type2onehotclass = {
@@ -165,7 +175,7 @@ class SunrgbdDatasetConfig(object):
         return np.transpose(corners_3d)
 
 
-class SunrgbdDetectionDataset(Dataset):
+class SunrgbdDetectionDataset_base(Dataset):
     def __init__(
         self,
         dataset_config,
@@ -237,6 +247,8 @@ class SunrgbdDetectionDataset(Dataset):
             scan_path = os.path.join(self.data_path, scan_name)
         point_cloud = np.load(scan_path + "_pc.npz")["pc"]  # Nx6
         bboxes = np.load(scan_path + "_bbox.npy")  # K,8
+        # Filter instance_bboxes and keep only those with classes that are in the dataset_config
+        bboxes = bboxes[np.isin(bboxes[:, -1], self.dataset_config.base_cls_inds)]
 
         # This step is needed only when evaluating pretrained models.
         # # convert sem cls (last column of bboxes) from SDCoT to 3DETR

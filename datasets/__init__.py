@@ -9,6 +9,7 @@ from .scannet_Pseudo_2_source_EMA_free_match import ScannetDetectionDataset_Pseu
 from .scannet_Pseudo_2_source_EMA_v2 import ScannetDetectionDataset_Pseudo_2_source_EMA_v2, ScannetDatasetConfig_Pseudo_2_source_EMA_v2
 
 from .sunrgbd import SunrgbdDetectionDataset, SunrgbdDatasetConfig
+from .sunrgbd_base import SunrgbdDetectionDataset_base, SunrgbdDatasetConfig_base
 
 # TODO implement scannet_incremental
 
@@ -19,7 +20,7 @@ DATASET_FUNCTIONS = {
 
 DATASET_FUNCTIONS_BASE = {
     "scannet": [ScannetDetectionDataset_base, ScannetDatasetConfig_base],
-    "sunrgbd": [SunrgbdDetectionDataset, SunrgbdDatasetConfig],
+    "sunrgbd": [SunrgbdDetectionDataset_base, SunrgbdDatasetConfig_base],
 }
 
 DATASET_FUNCTIONS_INCREMENTAL = {
@@ -56,24 +57,43 @@ DATASET_FUNCTIONS_Pseudo_2_source_EMA_free_match = {
 def build_dataset(args):
     dataset_builder = DATASET_FUNCTIONS[args.dataset_name][0]
     dataset_config = DATASET_FUNCTIONS[args.dataset_name][1]()
-
-    dataset_dict = {
-        "train": dataset_builder(
-            dataset_config,
-            split_set="train",
-            root_dir=args.dataset_root_dir,
-            meta_data_dir=args.meta_data_dir,
-            use_color=args.use_color,
-            augment=True
-        ),
-        "test": dataset_builder(
-            dataset_config,
-            split_set="val",
-            root_dir=args.dataset_root_dir,
-            use_color=args.use_color,
-            augment=False,
-        ),
-    }
+    try:
+        dataset_dict = {
+            "train": dataset_builder(
+                dataset_config,
+                split_set="train",
+                root_dir=args.dataset_root_dir,
+                meta_data_dir=args.meta_data_dir,
+                use_color=args.use_color,
+                augment=True
+            ),
+            "test": dataset_builder(
+                dataset_config,
+                split_set="val",
+                root_dir=args.dataset_root_dir,
+                use_color=args.use_color,
+                augment=False,
+            ),
+        }
+    except TypeError:
+        # for sunrgbd there is no meta_data_dir
+        dataset_dict = {
+            "train": dataset_builder(
+                dataset_config,
+                split_set="train",
+                root_dir=args.dataset_root_dir,
+                # meta_data_dir=args.meta_data_dir,
+                use_color=args.use_color,
+                augment=True
+            ),
+            "test": dataset_builder(
+                dataset_config,
+                split_set="val",
+                root_dir=args.dataset_root_dir,
+                use_color=args.use_color,
+                augment=False,
+            ),
+        }
     return dataset_dict, dataset_config
 
 
@@ -81,24 +101,43 @@ def build_dataset_base(args):
     dataset_builder = DATASET_FUNCTIONS_BASE[args.dataset_name][0]
     dataset_config = DATASET_FUNCTIONS_BASE[args.dataset_name][1](
         num_base_class=args.num_base_class)
-
-    dataset_dict = {
-        "train": dataset_builder(
-            dataset_config,
-            split_set="train",
-            root_dir=args.dataset_root_dir,
-            meta_data_dir=args.meta_data_dir,
-            use_color=args.use_color,
-            augment=True
-        ),
-        "test": dataset_builder(
-            dataset_config,
-            split_set="val",
-            root_dir=args.dataset_root_dir,
-            use_color=args.use_color,
-            augment=False,
-        ),
-    }
+    try:
+        dataset_dict = {
+            "train": dataset_builder(
+                dataset_config,
+                split_set="train",
+                root_dir=args.dataset_root_dir,
+                meta_data_dir=args.meta_data_dir,
+                use_color=args.use_color,
+                augment=True
+            ),
+            "test": dataset_builder(
+                dataset_config,
+                split_set="val",
+                root_dir=args.dataset_root_dir,
+                use_color=args.use_color,
+                augment=False,
+            ),
+        }
+    except TypeError:
+        # for sunrgbd there is no meta_data_dir
+        dataset_dict = {
+            "train": dataset_builder(
+                dataset_config,
+                split_set="train",
+                root_dir=args.dataset_root_dir,
+                # meta_data_dir=args.meta_data_dir,
+                use_color=args.use_color,
+                augment=True
+            ),
+            "test": dataset_builder(
+                dataset_config,
+                split_set="val",
+                root_dir=args.dataset_root_dir,
+                use_color=args.use_color,
+                augment=False,
+            ),
+        }
     return dataset_dict, dataset_config
 
 

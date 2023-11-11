@@ -232,7 +232,7 @@ def do_train(
                 best_val_metrics,
             )
 
-        if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1):
+        if epoch % args.eval_every_epoch == 0 or epoch == (args.max_epoch - 1) or epoch == 0:
             ap_calculator = evaluate(
                 args,
                 epoch,

@@ -43,12 +43,19 @@ NUM_CLASS_INCREMENTAL = 9  # depending on the incremental training classes.
 # SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = np.array([
 #     0.93, 0.95, 0.89, 0.86, 0.83, 0.89, 0.88, 0.9, 0.21])  # TODO update this
 
+# SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = np.array([
+#     0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
+# SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = np.array([
+#     0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
+# SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = np.array([
+#     0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])  # TODO update this
+
 SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = np.array([
-    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
+    0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8])
 SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = np.array([
-    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
+    0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8])
 SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = np.array([
-    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])  # TODO update this
+    0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8])  # TODO update this
 
 SCANNET_BASE_PSEUDO_THRESHOLDS = {
     9: SCANNET_9_9_BASE_PSEUDO_THRESHOLDS,

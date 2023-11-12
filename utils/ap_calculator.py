@@ -421,7 +421,7 @@ def parse_predictions_SDCoT_dynamic(
                             )
                             for j in range(pred_corners_3d_upright_camera.shape[1])
                             if pred_mask[i, j] == 1
-                            and obj_prob[i, j] > threshold_list[ii]
+                            # and obj_prob[i, j] > threshold_list[ii]
                             and sem_cls_probs[i, j, ii] > threshold_list[ii]
                         ]
                     else:
@@ -654,7 +654,7 @@ def parse_predictions_SDCoT(
                             )
                             for j in range(pred_corners_3d_upright_camera.shape[1])
                             if pred_mask[i, j] == 1
-                            and obj_prob[i, j] > threshold_list[ii]
+                            # and obj_prob[i, j] > threshold_list[ii]
                             and sem_cls_probs[i, j, ii] > threshold_list[ii]
                         ]
                     else:

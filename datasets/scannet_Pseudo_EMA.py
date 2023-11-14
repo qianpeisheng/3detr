@@ -32,19 +32,22 @@ DATASET_ROOT_DIR = "scannet_data/scannet_all"  # Replace with path to dataset
 DATASET_METADATA_DIR = "scannet_data/scannet/meta_data"
 # In this dataset, all scans are saved in the same folder.
 
-NUM_CLASS_BASE = 9  # depending on the base training classes.
-NUM_CLASS_INCREMENTAL = 9  # depending on the incremental training classes.
+NUM_CLASS_BASE = 999  # depending on the base training classes.
+NUM_CLASS_INCREMENTAL = 999  # depending on the incremental training classes.
 
 SCANNET_9_9_BASE_PSEUDO_THRESHOLDS = np.array([
     0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
 SCANNET_14_4_BASE_PSEUDO_THRESHOLDS = np.array([
     0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
+SCANNET_16_2_BASE_PSEUDO_THRESHOLDS = np.array([
+    0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])
 SCANNET_17_1_BASE_PSEUDO_THRESHOLDS = np.array([
     0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9])  # TODO update this
 
 SCANNET_BASE_PSEUDO_THRESHOLDS = {
     9: SCANNET_9_9_BASE_PSEUDO_THRESHOLDS,
     14: SCANNET_14_4_BASE_PSEUDO_THRESHOLDS,
+    16: SCANNET_16_2_BASE_PSEUDO_THRESHOLDS,
     17: SCANNET_17_1_BASE_PSEUDO_THRESHOLDS,
 }
 
